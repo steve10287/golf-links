@@ -124,3 +124,31 @@ body.overhead { cursor:crosshair; }
 }
 
 body.clean #hud, body.clean #intro { display:none !important; }
+
+#streakCard, #pinCard, #diffBadge, #aimBox, #targetCard, #pinMarker, #gradeCard, #shotInfo { display:none !important; }
+#holeCard { min-width:0; padding:6px 10px; }
+#holeCard .row1 { font-size:15px; }
+#holeCard .row3 { display:none; }
+#topRight { gap:6px; }
+#windCard { padding:4px 8px; }
+#windCard .lbl { display:none; }
+#settingsBtn { width:36px; height:36px; font-size:16px; letter-spacing:.12em; }
+#swingArea { left:0; right:0; width:auto; height:52%; background:transparent; align-items:flex-end; justify-content:center; pointer-events:none; }
+#swingPad { width:100%; height:100%; border:0; background:transparent; box-shadow:none; border-radius:0; pointer-events:auto; }
+#swingPad .ideal, #padDot, #padHint, #tempoRead, #arcWrap { opacity:0; }
+#swingArea.live #padDot, #swingArea.live #tempoRead, #swingArea.live #arcWrap, #swingArea.live #padHint { opacity:1; }
+#swingArea.live #swingPad .ideal { opacity:.45; }
+#padLine { stroke:#f7f4ee; }
+#clubSel { position:absolute; left:calc(12px + env(safe-area-inset-left)); bottom:calc(16px + env(safe-area-inset-bottom)); z-index:14; }
+#clubPrev, #clubNext { display:none; }
+#bottomBar { pointer-events:none; }
+#bottomBar #clubSel { pointer-events:auto; }
+#tip { position:absolute; left:50%; bottom:28%; transform:translateX(-50%); background:rgba(12,8,18,.72); border-radius:12px; padding:8px 12px; font-weight:700; letter-spacing:.02em; max-width:90vw; text-align:center; }
+#lab { position:fixed; right:10px; bottom:10px; z-index:16; width:min(320px, 92vw); color:#fff; font-family:Rajdhani,sans-serif; }
+#labTab, #labHit, #labClear { pointer-events:auto; }
+#labBody { background:rgba(16,10,24,.88); border:1px solid rgba(255,255,255,.16); border-radius:14px; padding:8px; max-height:70vh; overflow:auto; }
+#labRead { white-space:pre-wrap; font-size:13px; font-weight:700; margin-bottom:6px; }
+#labSliders label { display:flex; gap:6px; align-items:center; font-size:12px; margin:3px 0; }
+#labSliders span { width:78px; }
+#labSliders input[type=range] { flex:1; }
+#lab button { margin-top:6px; }

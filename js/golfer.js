@@ -139,14 +139,42 @@ export function createGolfer() {
     swing.bones.LeftHand.getWorldQuaternion(qA);
     v2.set(off.x, off.y, off.z).applyQuaternion(qA);
     const grip = lead.add(v2).clone();
-    const shaftDir = v3.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
-    // The capture has no club marker. A shaft frozen in the wrist meets the
-    // ball at address and still misses by about 0.7 m at impact, because the
-    // wrist joint is not the grip. Bend the shaft onto the ball through the
-    // bottom of the downswing, then let the captured wrist angle take the finish.
+    const frozen = v3.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
+    // Shaft from both hands: trail hand sits closer to the clubhead, so
+    // lead → trail is the handle. Wrist hinge (forearm × handle) keeps the
+    // shaft in that plane instead of a single frozen wrist axis.
+    const trail = swing.bones.RightHand.getWorldPosition(new THREE.Vector3());
+    const leadElbow = swing.bones.LeftForeArm.getWorldPosition(new THREE.Vector3());
+    const handle = trail.clone().sub(grip);
+    const forearm = grip.clone().sub(leadElbow);
+    let shaftDir = frozen.clone();
+    if (handle.length() > 0.04 && forearm.length() > 0.04) {
+      handle.normalize();
+      forearm.normalize();
+      if (handle.dot(frozen) < 0) handle.negate();
+      const hinge = new THREE.Vector3().crossVectors(forearm, handle);
+      if (hinge.lengthSq() > 1e-6) {
+        hinge.normalize();
+        const plane = new THREE.Vector3().crossVectors(hinge, forearm).normalize();
+        if (plane.dot(frozen) < 0) plane.negate();
+        // Hands dominate once the backswing is moving; address stays on the
+        // calibrated shaft so the head starts on the ball.
+        const handK = s <= 0 ? 0 : s < 0.45 ? s / 0.45 : (s < 1.65 ? 1 : Math.max(0, 1 - (s - 1.65) / 0.25));
+        shaftDir.copy(frozen).lerp(plane, handK).normalize();
+      }
+    }
+    // Full-iron top: pull the hand-derived shaft toward parallel with the ground
+    // (a few degrees downhill). Only around the top, so address and impact stay put.
+    if (s > 0.72 && s < 1.28) {
+      const k = 1 - Math.abs(s - 1) / 0.28;
+      const h = Math.hypot(shaftDir.x, shaftDir.z) || 1e-4;
+      const flat = new THREE.Vector3(shaftDir.x / h * 0.99, -0.14, shaftDir.z / h * 0.99);
+      shaftDir.lerp(flat, Math.max(0, k) * 0.85).normalize();
+    }
     let len = clip.clubLength;
-    if (ballWorld && s > 1.25 && s < 2.5) {
-      const k = s <= 2 ? Math.max(0, (s - 1.25) / 0.75) : Math.max(0, 1 - (s - 2) / 0.5);
+    // Small correction only near impact, so the head meets the ball.
+    if (ballWorld && s > 1.65 && s < 2.35) {
+      const k = s <= 2 ? (s - 1.65) / 0.35 : Math.max(0, 1 - (s - 2) / 0.35);
       const to = new THREE.Vector3(ballWorld.x, ballWorld.y, ballWorld.z).sub(grip);
       const dist = to.length();
       if (dist > 0.05 && k > 0) {
@@ -206,15 +234,24 @@ export function createGolfer() {
   }
 
   function place(ball, aimYaw, heightAt) {
-    const head = active.addressHead;
+    // Down-the-line: the mocap chest already faces across the target line,
+    // so a camera on that line sees a right-hander from behind his trail side.
     const yaw = -aimYaw;
+    const key = yaw.toFixed(4) + '|' + ball.x.toFixed(2) + '|' + ball.z.toFixed(2) + '|' + active.name;
     anchor.rotation.y = yaw;
-    const c = Math.cos(yaw), sn = Math.sin(yaw);
-    const hx = head.x * c + head.z * sn;
-    const hz = -head.x * sn + head.z * c;
-    const x = ball.x - hx;
-    const z = ball.z - hz;
-    anchor.position.set(x, heightAt(x, z), z);
+    anchor.scale.set(1, 1, 1);
+    if (active.placeKey === key) {
+      anchor.position.copy(active.placePos);
+      return;
+    }
+    anchor.position.set(ball.x, heightAt(ball.x, ball.z), ball.z);
+    anchor.updateMatrixWorld(true);
+    const hit = poseAt(active, 0, null);
+    anchor.position.x += ball.x - hit.head.x;
+    anchor.position.z += ball.z - hit.head.z;
+    anchor.position.y = heightAt(anchor.position.x, anchor.position.z);
+    active.placeKey = key;
+    active.placePos = anchor.position.clone();
   }
 
   function update(_dt, inp) {
