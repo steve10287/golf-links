@@ -42,7 +42,7 @@ let useBloom = true;
 
 function onResize() {
   camera.aspect = innerWidth / innerHeight;
-  camera.fov = camera.aspect < 1 ? 64 : 48;
+  camera.fov = 46;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setPixelRatio(pixelRatio); composer.setSize(innerWidth, innerHeight);
@@ -243,10 +243,11 @@ function newShotSetup() {
     S.phase = 'aim';
   } else {
     placeInitialTarget();
-    S.phase = 'overhead';
+    S.phase = 'aim';
   }
   updateHUD();
   updateAimVisuals();
+  cutToAddress();
 }
 
 function retryShot() {
@@ -625,24 +626,25 @@ const camPosT = new THREE.Vector3(), camLookT = new THREE.Vector3();
 const upVec = new THREE.Vector3(0, 1, 0);
 
 function setCamAddress() {
+  // Camera, ball and target are collinear. Same offset in portrait and landscape.
   const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
-  const rx = -dz, rz = dx;
   const b = S.ball;
-  const portrait = camera.aspect < 1;
-  if (isPutting()) {
-    const back = 4.1, side = 0.85;
-    camPosT.set(b.x - dx * back + rx * side, b.y + 1.55, b.z - dz * back + rz * side);
-    camLookT.set(b.x + dx * 0.15 + rx * 0.12, b.y + 0.7, b.z + dz * 0.15 + rz * 0.12);
-  } else {
-    const back = portrait ? 6.3 : 7.1;
-    const side = portrait ? 1.35 : 1.55;
-    const height = portrait ? 2.05 : 1.85;
-    camPosT.set(b.x - dx * back + rx * side, b.y + height, b.z - dz * back + rz * side);
-    const ahead = portrait ? 2.1 : 2.8;
-    camLookT.set(b.x + dx * ahead + rx * 0.05, b.y + 0.95, b.z + dz * ahead + rz * 0.05);
-  }
-  const h = course.heightAt(camPosT.x, camPosT.z) + 0.45;
+  const ground = b.y - P.BALL_R;
+  const back = 3.6;
+  camPosT.set(b.x - dx * back, ground + 1.7, b.z - dz * back);
+  camLookT.set(b.x + dx * 0.55, ground + 1.2, b.z + dz * 0.55);
+  const h = course.heightAt(camPosT.x, camPosT.z) + 0.3;
   if (camPosT.y < h) camPosT.y = h;
+}
+
+function cutToAddress() {
+  setCamAddress();
+  camPos.copy(camPosT);
+  camLook.copy(camLookT);
+  const veil = $('veil');
+  if (!veil) return;
+  veil.classList.add('on');
+  requestAnimationFrame(() => requestAnimationFrame(() => veil.classList.remove('on')));
 }
 
 function setCamOverhead() {
