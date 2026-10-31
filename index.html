@@ -3,150 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="theme-color" content="#1a0b24" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E⛳%3C/text%3E%3C/svg%3E" />
-<title>Vice Links — Par 3</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Yellowtail&display=swap" rel="stylesheet" />
+<meta name="theme-color" content="#8ec6ea" />
+<title>Vice Links</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%23f4f1ea'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="style.css" />
 <script type="importmap">
-{ "imports": { "three": "./js/lib/three.module.min.js", "three/addons/": "./js/lib/addons/" } }
+{ "imports": { "three": "./js/lib/three.module.min.js" } }
 </script>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="veil"></div>
-<canvas id="fx"></canvas>
-
-<div id="hud" class="hidden">
-  <div id="holeCard" class="card">
-    <div class="row1"><span class="hole">HOLE 1</span><span class="par">PAR 3</span></div>
-    <div class="row2"><span id="holeYds">161 YDS</span> · <span id="strokeLbl">STROKE 1</span></div>
-    <div class="row3" id="lieLbl">Lie: Tee</div>
-  </div>
-  <div id="topRight">
-    <div class="card small" id="windCard"><div id="windArrow">➤</div><div><div class="lbl">WIND</div><div id="windVal">3 mph</div></div></div>
-    <div class="card small" id="streakCard" hidden><div class="lbl">STREAK</div></div>
-    <div class="card small" id="pinCard"><div class="lbl">TO PIN</div><div id="toPin">161 yds</div></div>
-    <button id="settingsBtn" class="iconBtn" title="Menu" type="button">···</button>
-  </div>
-  <button id="diffBadge" class="diffBadge" type="button">PRO SWING</button>
-  <div id="pinMarker"><div class="pm-dist" id="pinMarkerDist">161y</div><div class="pm-arrow">▼</div></div>
-  <div id="targetTag" class="hidden"><span id="targetTagDist">150</span></div>
-
-  <div id="bottomBar">
-    <div id="targetCard" class="card hidden">
-      <div class="thint" id="targetHint">DRAG THE RING TO AIM</div>
-      <div class="trow"><span class="lbl">TO TARGET</span><b id="toTarget">—</b></div>
-      <div class="trow"><span class="lbl">TARGET TO PIN</span><b id="targetPin">—</b></div>
-    </div>
-    <div id="bottomRow">
-      <div id="clubSel">
-        <button id="clubPrev" class="arrowBtn">‹</button>
-        <div id="clubBox"><div id="clubId">8i</div><div id="clubCarry">163 yds</div></div>
-        <button id="clubNext" class="arrowBtn">›</button>
-      </div>
-      <div id="aimBox">
-        <button id="aimL" class="arrowBtn big">◀</button>
-        <div class="lbl">AIM</div>
-        <button id="aimR" class="arrowBtn big">▶</button>
-      </div>
-      <button id="confirmBtn" class="neonBtn confirmBtn hidden" type="button">CONFIRM</button>
-    </div>
-  </div>
-
-  <div id="swingArea">
-    <div id="arcWrap">
-      <svg id="powerArc" viewBox="0 0 100 188">
-        <defs>
-          <linearGradient id="arcGrad" x1="0" y1="1" x2="0" y2="0">
-            <stop offset="0%" stop-color="#3ff3ff"/>
-            <stop offset="62%" stop-color="#ffffff"/>
-            <stop offset="100%" stop-color="#ffb05a"/>
-          </linearGradient>
-        </defs>
-        <path id="arcTrack" d="M78,176 C78,176 16,140 20,94 C24,46 78,14 78,14" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="12" stroke-linecap="round" pathLength="100"/>
-        <path id="arcFill" d="M78,176 C78,176 16,140 20,94 C24,46 78,14 78,14" fill="none" stroke="url(#arcGrad)" stroke-width="12" stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
-        <path id="arcOver" d="M78,14 C86,6 96,6 98,14" fill="none" stroke="#ff3fa4" stroke-width="12" stroke-linecap="round" opacity="0.25"/>
-        <circle id="arcTick" cx="78" cy="14" r="4.5" fill="#ffb05a"/>
-      </svg>
-      <div id="arcLbl">0%</div>
-    </div>
-    <div id="swingPad">
-      <div class="ideal"></div>
-      <div class="padHint" id="padHint">DRAG DOWN<br/>THEN STRAIGHT UP</div>
-      <div id="padDot"></div>
-      <div id="tempoRead"></div>
-      <svg id="padTrail" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="padLine" points="" /></svg>
-    </div>
-  </div>
-
-  <div id="gradeCard" class="card hidden">
-    <svg id="gradeSvg" viewBox="0 0 64 96" width="54" height="80">
-      <line x1="32" y1="6" x2="32" y2="90" stroke="rgba(63,243,255,.55)" stroke-width="2" stroke-dasharray="3 3"/>
-      <polyline id="gradeLine" points="" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-    <div class="gradeBody">
-      <div class="gradeTitle" id="gradeTitle">SWING</div>
-      <div class="gradeRows">
-        <div><span>TEMPO</span><b id="gTempo">—</b></div>
-        <div><span>PATH</span><b id="gPath">—</b></div>
-        <div><span>POWER</span><b id="gPower">—</b></div>
-      </div>
-      <div id="gradeMiss"></div>
-      <div id="gradeNote"></div>
-    </div>
-  </div>
-
-  <div id="shotInfo" class="card hidden"></div>
-  <div id="toast" class="hidden"></div>
-</div>
-
-<div id="perfectFlash" class="hidden">PERFECT!</div>
-
-<div id="bigMsg" class="hidden"><div id="bigTitle">HOLE IN ONE!</div><div id="bigSub"></div><div id="bigBtns"><button id="againBtn" class="neonBtn">PLAY AGAIN</button></div></div>
-
-<div id="intro">
-  <div class="introInner">
-    <div class="logo">Vice Links</div>
-    <div class="tag">OCEAN DRIVE GOLF CLUB · HOLE 1 · PAR 3</div>
-    <button id="playBtn" class="neonBtn">PLAY</button>
-    <div class="howto">
-      <b>Aim:</b> drag sideways. The camera flies out to the landing spot and comes back when you let go.<br/>
-      <b>Swing:</b> drag down on the lower screen, then straight up. The line ticks when you are on path.<br/>
-      <b>Pro Swing</b> is the default: tight windows, no assist. A PERFECT swing finds the target.
-    </div>
-    <div id="loadMsg"></div>
-  </div>
-</div>
-
-<div id="settings" class="hidden">
-  <div class="card settingsCard">
-    <h3>Settings</h3>
-    <label>Difficulty
-      <select id="diffSel">
-        <option value="amateur">Amateur — wide windows, swing assist</option>
-        <option value="tour">Tour — tighter windows</option>
-        <option value="pro" selected>Pro Swing — tight windows, no assist</option>
-      </select>
-    </label>
-    <label>Graphics
-      <select id="qualSel"><option value="auto" selected>Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
-    <label><input type="checkbox" id="muteChk" /> Mute audio</label>
-    <label><input type="checkbox" id="hapticChk" checked /> Haptics</label>
-    <p class="credits">Android uses vibration. iPhone uses the iOS switch tick when the browser supports it. There is no tick if the phone blocks both.</p>
-    <div id="menuStreak">Perfect streak <b id="streakVal">0</b></div>
-    <button id="retryBtn" class="ghostBtn" type="button">Retry last shot</button>
-    <button id="resetBtn" class="ghostBtn" type="button">Restart hole</button>
-    <button id="eyeBtn" class="ghostBtn" type="button">Hole map</button>
-    <button id="rangeBtn" class="ghostBtn" type="button">Range / Physics Lab</button>
-    <button id="leaveRange" class="ghostBtn" type="button">Back to the hole</button>
-    <button id="closeSettings" class="neonBtn">DONE</button>
-  </div>
-</div>
+<div id="hud"></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

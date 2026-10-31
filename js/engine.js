@@ -14,8 +14,19 @@ const AREA = Math.PI * BALL_R * BALL_R;
 const MPH = 0.44704;
 const RPM = Math.PI / 30;
 
-/** Smits & Smith 1994, as reproduced from their wind-tunnel fit. S = r ω / V. */
-export const AERO = { clCoef: 0.54, clExp: 0.4, cd0: 0.24, cdS: 0.18, spinDecay: -0.00002 };
+/**
+ * Drag and lift.
+ * Smits & Smith 1994: C_L = 0.54 S^0.4, spin part of drag 0.18 S, S = r ω / V.
+ * Bearman & Harvey 1976: dimpled-ball drag falls from about 0.48 below the
+ * crisis to about 0.25 once Re is above ~9e4, and lift saturates near 0.28.
+ * The log blend between those two measured drag levels is only the join
+ * between the regimes, not a fit to tour carries.
+ */
+export const AERO = {
+  clCoef: 0.54, clExp: 0.4, clMax: 0.28,
+  cdSub: 0.48, cdSuper: 0.25, reSub: 5e4, reSuper: 9e4,
+  cdS: 0.18, spinDecay: -0.00002,
+};
 
 export const SURF = { WATER: 0, GREEN: 1, FRINGE: 2, FAIRWAY: 3, ROUGH: 4, BUNKER: 5, TEE: 6, SAND: 7 };
 
@@ -73,10 +84,17 @@ export function airDensity(tempC = 15, altitudeM = 0, humidity = 0) {
 
 export function aeroCoeffs(speed, spinRad) {
   const v = Math.max(0.5, speed);
+  const Re = v * (2 * BALL_R) / 1.51e-5;
   const S = BALL_R * spinRad / v;
-  const cl = AERO.clCoef * Math.pow(Math.max(0, S), AERO.clExp);
-  const cd = AERO.cd0 + AERO.cdS * S;
-  return { cd, cl, S };
+  const cl = Math.min(AERO.clMax, AERO.clCoef * Math.pow(Math.max(0, S), AERO.clExp));
+  let base = AERO.cdSuper;
+  if (Re <= AERO.reSub) base = AERO.cdSub;
+  else if (Re < AERO.reSuper) {
+    const t = (Math.log(Re) - Math.log(AERO.reSub)) / (Math.log(AERO.reSuper) - Math.log(AERO.reSub));
+    base = AERO.cdSub + (AERO.cdSuper - AERO.cdSub) * t;
+  }
+  const cd = base + AERO.cdS * S;
+  return { cd, cl, S, Re };
 }
 
 /** Log-law wind. speed is m/s at refHeight (default 2 m). z0 = 0.03 m, short grass. */
@@ -110,7 +128,7 @@ export function shapeLabel(faceDeg, pathDeg) {
  * Centred-strike launch approximation.
  * launchDeg = 0.85 * dynamicLoft + 0.15 * attack. Dynamic loft on each
  * club is the value that reproduces the TrackMan launch. Spin rate uses
- * spinRpm = 3.05 * clubSpeedMph * spinLoft, flagged in PHYSICS.md as a fit
+ * spinRpm = 3.29 * clubSpeedMph * spinLoft, flagged in PHYSICS.md as a fit
  * to the 7-iron, not a first-principles impact solution.
  */
 export function launchFromDelivery(d) {

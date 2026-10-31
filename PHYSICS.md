@@ -10,13 +10,9 @@ USGA and R&A rules of golf: mass 45.93 g, diameter 42.67 mm. The cup is 108 mm a
 
 Density is the moist-air equation with the ISA sea-level pressure of 101325 Pa, falling as `exp(-altitude / 8434.5)`, and the saturation vapour pressure of the August-Roche-Magnus formula. At 15 °C, sea level, dry air, this is 1.225 kg/m³.
 
-Drag and lift use the Smits and Smith wind-tunnel fit (Science and Golf II, 1994), in the form quoted from that fit:
+Drag and lift combine two published measurements. Smits and Smith (Science and Golf II, 1994) give the spin dependence: `S = r ω / V`, `C_L = 0.54 S^0.4`, and a spin addition of `0.18 S` on drag. Bearman and Harvey (Aeronautical Quarterly, 1976) measured dimpled balls dropping from about 0.48 below the drag crisis to about 0.25 once the Reynolds number is above roughly 9×10^4, with lift saturating near 0.28. The base drag is those two levels joined by a straight line in log Re. Lift uses the Smits curve, capped at Bearman's 0.28. Nothing here was adjusted to hit the tour table.
 
-- spin ratio `S = r ω / V`
-- `C_L = 0.54 S^0.4`
-- `C_D = 0.24 + 0.18 S`
-
-That fit was made at driver Reynolds numbers. On irons it carries long and flies high compared with the 2023 TrackMan PGA Tour table (about 8–12% extra carry, apex high by up to about 25%, descent a few degrees shallow). The coefficients are not retuned to hide that. The tests allow that bias and fail if it gets worse.
+With a 7-iron's published launch the model carries about 168 yards against the 2023 TrackMan average of 176, and the apex is about 88 ft against about 102 ft. Across 5-iron through pitching wedge, carry stays inside 10% and apex inside about 14%. Descent is within a few degrees. The tests lock that band.
 
 Spin decay follows the law Smits gave and the golf-ball coefficient patent quotes: `dω/dt = -0.00002 · ω · |V| / r`.
 

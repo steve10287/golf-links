@@ -1,36 +1,31 @@
 # Vice Links
 
-Vice Links is a mobile browser par-3 golf game. Open the GitHub Pages URL on a phone:
+A mobile browser par 3. One hole, 161 yards. The swing is a touch stroke. A sideways drag aims.
 
 https://steve10287.github.io/golf-links/
 
-## Controls
+The fuller game (golfer, hole map, physics lab, sound) is the git tag `full-v1`.
 
-**Play** starts the hole. There is no motion control. Touch is the swing, and a mouse drag does the same thing on a desktop.
+## Play
 
-Before each full shot the camera flies up to a bird’s-eye view of the hole. Drag the glowing target ring to aim. The ring is the dispersion you should expect for this club and difficulty: tight on **Pro Swing**, wider on Amateur. Distance is clamped to the club’s range, and the club is suggested for the yardage. The card shows distance to the target, target-to-pin, and the wind. **Confirm** flies back behind the ball. **BIRD'S EYE** opens that view again.
+Drag down on the lower part of the screen, then back up through the ball. How far you pull is how hard you swing. The line and the timing set face, path, and speed. Drag sideways to rotate the aim. The camera sits 3.6 m behind the ball, follows the flight, and cuts back behind the ball for the next shot.
 
-**Swing:** drag down on the swing pad to take the club back, then push straight up through the ball.
+On the green the putter comes up on its own. Restart is the only menu.
 
-- Backswing length is power. The arc meter fills as you take it back. Past 100% is an overswing and costs accuracy.
-- Tempo is backswing time against downswing time. The ideal is about 3-to-1. Too fast or too slow costs distance and accuracy.
-- Path is how far the downswing drifts off the straight line. Drift left hooks; drift right slices.
-- Rushing the change of direction is penalised.
+Android phones buzz along the swing. iOS 18 Safari uses a hidden switch tick, because that browser has no vibration API. Older iPhones stay quiet.
 
-After the shot, Tempo, Path, and Power are graded Perfect, Great, Good, or Poor, with your swing line drawn against the ideal. The card also says where the ball landed versus the target.
+## Code
 
-**Pro Swing** is the default: tight windows, no assist. A PERFECT swing (all three Perfect, and a smooth transition) lands on the target, carries a little extra, spins more, turns the tracer gold, flashes PERFECT!, and vibrates the phone when the browser allows it. The HUD keeps a perfect-swing streak.
+- `js/main.js` — the hole
+- `js/input.js` — swing stick, aim drag, haptics
+- `js/swing.js` — path and tempo into the strike
+- `js/engine.js` — flight, bounce, and roll
+- `js/course.js` — the hole
+- `js/camera.js` — address and follow
+- `js/hud.js` — distance, stroke, club, wind
+- `PHYSICS.md` — where the numbers come from
+- `test/engine.test.js`
 
-**Tour** sits between Pro Swing and Amateur. **Amateur** uses wide windows and some assist.
-
-Putting stays a simpler drag stroke. It is still graded on tempo and path, and it skips the overhead view.
-
-Aim arrows and the club arrows still nudge the shot after you confirm. Difficulty and graphics are in Settings.
-
-## Golfer
-
-The figure is a capsule mannequin driven by motion capture, not a clothed character. The full swing is Carnegie Mellon subject 64, take 64_06. The putt is take 64_13. Dragging the stick scrubs the backswing. The push plays the downswing at that speed, impact is the launch, and the finish plays out. He does not walk between shots. The camera cuts to him already at address.
-
-The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217. BVH conversion by Bruce Hahne. See `assets/mocap/CREDIT.txt`.
-
-Strike, landing, breeze, birds, waves, and applause are synthesised in the browser. Mute is in Settings. The ↩ button retries the last shot.
+```
+node --test test/engine.test.js
+```

@@ -20,12 +20,16 @@ test('ISA density at 15 C sea level', () => {
   assert.ok(Math.abs(rho - 1.225) < 0.008, rho);
 });
 
-test('Smits and Smith coefficients', () => {
-  const { cd, cl, S } = aeroCoeffs(50, 300);
-  const expectS = BALL_R * 300 / 50;
-  assert.ok(Math.abs(S - expectS) < 1e-9);
-  assert.ok(Math.abs(cl - AERO.clCoef * Math.pow(S, AERO.clExp)) < 1e-9);
-  assert.ok(Math.abs(cd - (AERO.cd0 + AERO.cdS * S)) < 1e-9);
+test('Smits lift shape and Bearman drag regimes', () => {
+  const fast = aeroCoeffs(70, 200);
+  const slow = aeroCoeffs(20, 200);
+  const expectS = BALL_R * 200 / 70;
+  assert.ok(Math.abs(fast.S - expectS) < 1e-9);
+  const uncapped = AERO.clCoef * Math.pow(fast.S, AERO.clExp);
+  assert.ok(Math.abs(fast.cl - Math.min(AERO.clMax, uncapped)) < 1e-9);
+  assert.ok(fast.Re > AERO.reSuper);
+  assert.ok(Math.abs(fast.cd - (AERO.cdSuper + AERO.cdS * fast.S)) < 1e-9);
+  assert.ok(slow.cd > fast.cd);
 });
 
 test('log wind is stronger aloft', () => {
@@ -47,17 +51,16 @@ test('centred strike reproduces TrackMan launch', () => {
 });
 
 test('flight from TrackMan launch conditions', () => {
-  // Smits & Smith was fit on driver speeds. Iron carry comes out high.
-  // Tolerances are the measured bias, not a retuned coefficient.
+  // Bearman drag regimes plus the Smits lift curve. Still not tuned to the table.
   const course = flatCourse(SURF.FAIRWAY);
   for (const [id, ref] of Object.entries(TRACKMAN_2023)) {
     const L = launchFromMonitor({ ballSpeedMph: ref.ball, launchDeg: ref.launch, spinRpm: ref.spin, aimYaw: 0 });
     const m = simulate(course, tee, L, air).monitor;
     const carryErr = Math.abs(m.carryYd - ref.carry) / ref.carry;
     const apexErr = Math.abs(m.apexFt - ref.heightYd * 3) / (ref.heightYd * 3);
-    assert.ok(carryErr < 0.14, `${id} carry ${m.carryYd.toFixed(0)} vs ${ref.carry}`);
-    assert.ok(apexErr < 0.30, `${id} apex ${m.apexFt.toFixed(0)} vs ${ref.heightYd * 3}`);
-    assert.ok(Math.abs(m.descentDeg - ref.land) < 9, `${id} land ${m.descentDeg.toFixed(0)} vs ${ref.land}`);
+    assert.ok(carryErr < 0.11, `${id} carry ${m.carryYd.toFixed(0)} vs ${ref.carry}`);
+    assert.ok(apexErr < 0.16, `${id} apex ${m.apexFt.toFixed(0)} vs ${ref.heightYd * 3}`);
+    assert.ok(Math.abs(m.descentDeg - ref.land) < 6, `${id} land ${m.descentDeg.toFixed(0)} vs ${ref.land}`);
   }
 });
 
