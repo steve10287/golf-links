@@ -7,7 +7,8 @@ import * as C from './course.js';
 import * as P from './physics.js';
 import { buildWorld } from './world.js';
 import { DIFF, gradeSwing, dispersionYards, pathError, transitionRush } from './swing.js';
-import { createGolfer } from './golfer.js';
+import { loadGolfer } from './golfer.js';
+import { createAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const YD = 1.0936133, FT = 3.2808;
@@ -57,8 +58,22 @@ const blobTex = (() => { const cv = document.createElement('canvas'); cv.width =
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
 scene.add(blob);
 
-const golfer = createGolfer();
-scene.add(golfer.mesh);
+let golfer = { mesh: null, update() {} };
+const audio = createAudio();
+loadGolfer().then((g) => {
+  golfer = g;
+  scene.add(g.mesh);
+  $('loadMsg').textContent = '';
+  $('playBtn').disabled = false;
+  if (params.has('play')) {
+    startGame();
+    const pose = params.get('pose');
+    if (pose && pose !== 'overhead') $('confirmBtn').click();
+  }
+}).catch((err) => {
+  console.error(err);
+  $('loadMsg').textContent = 'Could not load the golfer';
+});
 
 const MAXT = 3000;
 const trPos = new Float32Array(MAXT * 2 * 3), trCol = new Float32Array(MAXT * 2 * 3);
@@ -124,6 +139,7 @@ const S = {
   wind: { x: 0, z: 0, mph: 0, ang: 0 }, shot: null, playT: 0, prev: null, stopT: 0,
   difficulty: 'pro', holed: false, target: null, targetPower: 1, strike: null, streak: 0, goldTracer: false,
   vis: { s: 0, power: 0, path: 0, releasing: false, releaseRate: 1.6, holding: false, holdT: 0 },
+  hitStop: 0, shake: 0,
 };
 const clubs = P.CLUBS;
 let dragTarget = null;
@@ -246,6 +262,23 @@ function newShotSetup() {
   updateAimVisuals();
 }
 
+function retryShot() {
+  if (!S.prev || S.phase === 'intro' || S.phase === 'flight') return;
+  placeBall(S.prev.x, S.prev.z);
+  S.lie = S.prev.lie;
+  S.ball.y = S.prev.y;
+  if (S.strokes > 0) S.strokes--;
+  S.shot = null;
+  S.vis.s = 0; S.vis.power = 0; S.vis.path = 0; S.vis.holding = false; S.vis.releasing = false;
+  $('shotInfo').classList.add('hidden');
+  $('gradeCard').classList.add('hidden');
+  $('perfectFlash').classList.add('hidden');
+  $('bigMsg').classList.add('hidden');
+  tracerPts = [];
+  updateTracer();
+  newShotSetup();
+}
+
 function resetHole() {
   S.strokes = 0; S.holed = false; tracerPts = []; updateTracer();
   placeBall(0, -4.5); S.lie = C.SURF.TEE; S.ball.y += 0.02;
@@ -313,6 +346,7 @@ function updateHUD() {
   arcPoint(tick);
   $('streakVal').textContent = String(S.streak);
   $('streakCard').classList.toggle('hot', S.streak > 0);
+  $('retryBtn').hidden = !(S.prev && S.phase !== 'flight' && S.phase !== 'intro' && S.phase !== 'holed');
   document.body.classList.toggle('overhead', S.phase === 'overhead');
 }
 
@@ -433,6 +467,10 @@ function takeShot(raw) {
   S.vis.path = clamp((grade.pathSign || 0) * (grade.pathMag || 0) / 0.1, -1, 1);
   S.vis.power = raw.power;
   if (grade.perfectBonus) showPerfect();
+  audio.strike(!!grade.allPerfect);
+  S.hitStop = grade.allPerfect ? 0.07 : 0.045;
+  S.shake = grade.allPerfect ? 0.28 : 0.12;
+  try { if (navigator.vibrate) navigator.vibrate(grade.allPerfect ? [12, 24, 28] : [10, 20, 14]); } catch (_) {}
   S.prev = { ...S.ball, lie: S.lie };
   S.strokes++;
   const res = P.simulate(course, { ...S.ball }, launch, putt ? { x: 0, z: 0 } : S.wind, { putt });
@@ -539,6 +577,8 @@ function finishShot() {
   }
   setTimeout(() => { if (S.phase === 'settle') newShotSetup(); }, res.result === 'water' ? 1500 : 700);
   S.phase = 'settle';
+  if (grade && (grade.allPerfect || res.result === 'holed' || S.lie === C.SURF.GREEN)) audio.applause(grade.allPerfect || res.result === 'holed');
+  $('retryBtn').hidden = false;
 }
 
 function holed() {
@@ -649,7 +689,12 @@ function sampleShot(t) {
 let introT = 0;
 function updateCamera(dt) {
   const overhead = S.phase === 'overhead';
-  if (S.phase === 'intro') {
+  if (params.get('pose') === 'close' && golfer.mesh) {
+    const p = golfer.mesh.position;
+    camPosT.set(p.x + 0.55, p.y + 1.62, p.z + 0.72);
+    camLookT.set(p.x, p.y + 1.55, p.z);
+    camUpT.set(0, 1, 0);
+  } else if (S.phase === 'intro') {
     introT += dt * 0.06;
     const a = introT + 3.3, r = 70;
     camPosT.set(C.PIN.x + Math.sin(a) * r, 22 + Math.sin(introT * 0.7) * 4, C.PIN.z + Math.cos(a) * r);
@@ -693,7 +738,19 @@ function updateCamera(dt) {
   camLook.lerp(camLookT, 1 - Math.exp(-dt * (overhead ? 2.4 : 5)));
   camUp.lerp(camUpT, 1 - Math.exp(-dt * 2.6)).normalize();
   camera.up.copy(camUp);
+  if (params.get('pose')) { camPos.copy(camPosT); camLook.copy(camLookT); }
   camera.position.copy(camPos);
+  if (S.shake > 0) {
+    const k = S.shake;
+    camera.position.x += Math.sin(elapsed * 68) * k * 0.12;
+    camera.position.y += Math.cos(elapsed * 53) * k * 0.06;
+    const base = camera.aspect < 1 ? 64 : 48;
+    camera.fov = base * (1 - Math.min(0.08, k * 0.2));
+    camera.updateProjectionMatrix();
+  } else if (S.phase !== 'overhead') {
+    const base = camera.aspect < 1 ? 64 : 48;
+    if (Math.abs(camera.fov - base) > 0.15) { camera.fov = base; camera.updateProjectionMatrix(); }
+  }
   camera.lookAt(camLook);
 }
 
@@ -723,7 +780,14 @@ $('resetBtn').onclick = () => { if (S.phase !== 'intro') resetHole(); };
 $('againBtn').onclick = () => resetHole();
 $('settingsBtn').onclick = () => $('settings').classList.remove('hidden');
 $('diffBadge').onclick = () => $('settings').classList.remove('hidden');
-$('closeSettings').onclick = () => { $('settings').classList.add('hidden'); setDifficulty($('diffSel').value); applyQuality($('qualSel').value); };
+$('closeSettings').onclick = () => {
+  $('settings').classList.add('hidden');
+  setDifficulty($('diffSel').value);
+  applyQuality($('qualSel').value);
+  audio.setMuted($('muteChk').checked);
+};
+$('muteChk').onchange = () => { audio.unlock(); audio.setMuted($('muteChk').checked); };
+$('retryBtn').onclick = () => retryShot();
 $('confirmBtn').onclick = () => {
   if (S.phase !== 'overhead') return;
   S.phase = 'aim';
@@ -818,11 +882,22 @@ function addMove(e) {
       sw.phase = 'fwd';
       sw.trans = sw.pts.length - 1;
       $('padHint').textContent = 'THROUGH';
+      try { if (navigator.vibrate) navigator.vibrate(12); } catch (_) {}
     }
+    const tBack = Math.max(0.05, (p.t - sw.pts[0].t) / 1000);
+    $('tempoRead').textContent = tBack < 0.4 ? 'QUICK' : tBack > 1.35 ? 'SLOW' : 'SET';
+    $('tempoRead').style.color = '#3ff3ff';
   } else if (!sw.fired && pull <= 0.02 && sw.max > 0.08) {
     sw.fired = true;
     sw.tDown = Math.max(0.05, (p.t - sw.pts[sw.trans].t) / 1000);
     fireSwing();
+  }
+  if (sw && sw.phase === 'fwd') {
+    const tBack = Math.max(0.05, (sw.pts[sw.trans].t - sw.pts[0].t) / 1000);
+    const tDown = Math.max(0.04, (p.t - sw.pts[sw.trans].t) / 1000);
+    const err = Math.abs(tBack / tDown - 3);
+    $('tempoRead').textContent = err < 0.55 ? 'SMOOTH' : tBack / tDown < 3 ? 'FAST' : 'LONG';
+    $('tempoRead').style.color = err < 0.55 ? '#ffe14a' : '#ff8ad4';
   }
   visFromPull(pull);
 }
@@ -879,6 +954,8 @@ addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'Arrow
 
 $('playBtn').onclick = () => startGame();
 function startGame() {
+  if (!golfer.mesh) return;
+  audio.unlock();
   $('intro').classList.add('hidden'); $('hud').classList.remove('hidden');
   resetHole();
   try { if (isMobile && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); } catch (_) {}
@@ -971,13 +1048,16 @@ function frame() {
 
   const poseName = params.get('pose');
   let swingS = S.vis.s, swingPower = S.vis.power || S.vis.s, swingPath = S.vis.path;
-  if (poseName === 'address') { swingS = 0; swingPower = 0; swingPath = 0; }
+  if (poseName === 'address' || poseName === 'close') { swingS = 0; swingPower = 0; swingPath = 0; }
   else if (poseName === 'top') { swingS = 1; swingPower = 1; swingPath = 0; }
+  else if (poseName === 'impact') { swingS = 2; swingPower = 1; swingPath = 0; }
   else if (poseName === 'finish') { swingS = 3; swingPower = 1; swingPath = params.get('path') === 'open' ? 0.8 : 0; }
   else if (poseName === 'over') { swingS = 1.22; swingPower = 1.22; swingPath = 0; }
 
+  if (S.hitStop > 0) S.hitStop = Math.max(0, S.hitStop - dt);
+  if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 1.4);
   if (S.phase === 'flight' || (S.phase === 'holed' && S.shot)) {
-    S.playT += dt;
+    if (S.hitStop <= 0) S.playT += dt;
     const p = sampleShot(S.playT);
     ball.position.set(p.x, p.y, p.z);
     const fr = S.shot.res.frames;
@@ -986,7 +1066,10 @@ function frame() {
       if (tracerPts.length) tracerPts.push({ x: p.x, y: p.y, z: p.z });
       if (!p.air) tracerPts = fr.filter((f) => f.air);
     }
-    for (const ev of S.shot.res.events) if (ev.type === 'water' && !ev.done && S.playT >= ev.t) { ev.done = true; doSplash(ev.x, ev.z); ball.visible = false; }
+    for (const ev of S.shot.res.events) {
+      if (ev.type === 'water' && !ev.done && S.playT >= ev.t) { ev.done = true; doSplash(ev.x, ev.z); ball.visible = false; audio.land('water'); }
+      if (ev.type === 'bounce' && !ev.heard && S.playT >= ev.t) { ev.heard = true; audio.land((C.SURF_NAME[ev.surf] || 'fairway').toLowerCase()); }
+    }
     const end = fr[fr.length - 1].t;
     if (S.phase === 'flight' && S.playT >= end) {
       S.stopT += dt;
@@ -1051,10 +1134,5 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-window.__golf = { S, startGame, takeShot, camera, resetHole, newShotSetup, placeBall, nominal, golfer, gradeSwing, DIFF };
+window.__golf = { S, startGame, takeShot, camera, renderer, scene, resetHole, newShotSetup, placeBall, nominal, get golfer() { return golfer; }, gradeSwing, DIFF, audio };
 if (params.has('clean')) document.body.classList.add('clean');
-if (params.has('play')) {
-  $('playBtn').click();
-  const pose = params.get('pose');
-  if (pose && pose !== 'overhead') $('confirmBtn').click();
-}

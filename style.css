@@ -96,6 +96,8 @@ body.overhead { cursor:crosshair; }
 .settingsCard select { width:100%; margin-top:4px; padding:8px; border-radius:10px; background:#241032; color:#fff; border:1px solid rgba(255,255,255,.25); font-family:inherit; font-size:15px; }
 .settingsCard .row { display:flex; gap:8px; }
 .settingsCard .row .ghostBtn { margin:6px 0; }
+.credits { font-size:12px; line-height:1.35; opacity:.8; margin:8px 0 12px; }
+#tempoRead { position:absolute; left:8px; right:8px; bottom:8px; text-align:center; font-size:13px; font-weight:700; letter-spacing:.12em; color:var(--cyan); pointer-events:none; text-shadow:0 0 8px rgba(0,0,0,.8); }
 @media (max-width:420px) {
   #swingPad { width:108px; height:168px; }
   #arcWrap { height:168px; width:58px; }

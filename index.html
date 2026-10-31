@@ -30,6 +30,7 @@
     <div class="card small" id="windCard"><div id="windArrow">➤</div><div><div class="lbl">WIND</div><div id="windVal">3 mph</div></div></div>
     <div class="card small" id="streakCard"><div class="lbl">STREAK</div><div id="streakVal">0</div></div>
     <div class="card small"><div class="lbl">TO PIN</div><div id="toPin">161 yds</div></div>
+    <button id="retryBtn" class="iconBtn" title="Retry last shot" hidden>↩</button>
     <button id="resetBtn" class="iconBtn" title="Restart hole">↺</button>
     <button id="settingsBtn" class="iconBtn" title="Settings">⚙</button>
     <button id="eyeBtn" class="eyeBtn hidden" type="button">BIRD'S EYE</button>
@@ -80,6 +81,7 @@
       <div class="ideal"></div>
       <div class="padHint" id="padHint">DRAG DOWN<br/>THEN STRAIGHT UP</div>
       <div id="padDot"></div>
+      <div id="tempoRead"></div>
       <svg id="padTrail" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="padLine" points="" /></svg>
     </div>
   </div>
@@ -113,13 +115,13 @@
   <div class="introInner">
     <div class="logo">Vice Links</div>
     <div class="tag">OCEAN DRIVE GOLF CLUB · HOLE 1 · PAR 3</div>
-    <button id="playBtn" class="neonBtn">PLAY</button>
+    <button id="playBtn" class="neonBtn" disabled>PLAY</button>
     <div class="howto">
       <b>Aim:</b> before each full shot the camera flies overhead. Drag the glowing target, then tap Confirm.<br/>
       <b>Swing:</b> drag down on the pad for power, then push straight up through the ball. Tempo, path, and the change of direction are graded. Past 100% is an overswing.<br/>
       <b>Pro Swing</b> is the default: tight windows, no assist. A PERFECT swing finds the target.
     </div>
-    <div id="loadMsg">Loading course…</div>
+    <div id="loadMsg">Loading golfer…</div>
   </div>
 </div>
 
@@ -135,6 +137,8 @@
     </label>
     <label>Graphics
       <select id="qualSel"><option value="auto" selected>Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
+    <label><input type="checkbox" id="muteChk" /> Mute audio</label>
+    <p class="credits">Golfer: MakeHuman male body, young light-skinned skin, casual suit, shoes, and fedora. CC0. Swing poses are original. CMU golf mocap was not used.</p>
     <button id="closeSettings" class="neonBtn">DONE</button>
   </div>
 </div>

@@ -29,6 +29,8 @@ Aim arrows and the club arrows still nudge the shot after you confirm. Difficult
 
 ## Golfer
 
-A golfer stands at the ball in the swing view. He is an original procedural skinned character built for this game (one smooth mesh: polo, trousers, cap, golf shoes, glove, and a club). He is not a real person and the mesh is not a third-party model, so there is no external character licence. The clubhead changes with the club you select, including the putter.
+The golfer is a MakeHuman character, not a photograph of a real person. Body: `male_generic`. Skin: young light-skinned male diffuse. Clothes: `male_casualsuit02`, `shoes01`, and `fedora`, all from the MakeHuman system assets, which are CC0. The skeleton is the same CC0 MakeHuman rig. The packed file is `assets/golfer.glb` (about 2 MB, about 36k triangles, JPEG textures). It loads on the intro screen. Credits are also in Settings.
 
-His swing is driven by the stick. Dragging back takes the club back in proportion to power (past 100% is a longer, looser top). Pushing up plays the downswing, impact, and follow-through at the speed of that push. The ball leaves at impact. A crooked path shows up in the finish. While you aim he breathes and waggles. The bird’s-eye view fades him out. On the next shot he walks over when it is close, and teleports when it is not.
+CMU subject 64 is a free golf-swing capture (you may copy and redistribute it, but not resell the data). Retargeting that clip onto this suit without tearing the mesh did not hold, so the swing is still a procedural pose driven by the stick: the backswing follows the drag, the downswing follows the push, and the ball leaves at impact. The joint range is kept small so the clothing stays in one piece. He reads as a person in a suit and hat. He does not look like a PGA Tour 2K25 golfer.
+
+Strike, landing, breeze, birds, waves, and applause are synthesised in the browser. Mute is in Settings. The ↩ button retries the last shot.
