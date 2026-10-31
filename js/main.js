@@ -7,7 +7,7 @@ import * as C from './course.js';
 import * as P from './physics.js';
 import { buildWorld } from './world.js';
 import { DIFF, gradeSwing, dispersionYards, pathError, transitionRush } from './swing.js';
-import { loadGolfer } from './golfer.js';
+import { createGolfer } from './golfer.js';
 import { createAudio } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -58,22 +58,9 @@ const blobTex = (() => { const cv = document.createElement('canvas'); cv.width =
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
 scene.add(blob);
 
-let golfer = { mesh: null, update() {} };
+const golfer = createGolfer();
+scene.add(golfer.mesh);
 const audio = createAudio();
-loadGolfer().then((g) => {
-  golfer = g;
-  scene.add(g.mesh);
-  $('loadMsg').textContent = '';
-  $('playBtn').disabled = false;
-  if (params.has('play')) {
-    startGame();
-    const pose = params.get('pose');
-    if (pose && pose !== 'overhead') $('confirmBtn').click();
-  }
-}).catch((err) => {
-  console.error(err);
-  $('loadMsg').textContent = 'Could not load the golfer';
-});
 
 const MAXT = 3000;
 const trPos = new Float32Array(MAXT * 2 * 3), trCol = new Float32Array(MAXT * 2 * 3);
@@ -954,7 +941,6 @@ addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'Arrow
 
 $('playBtn').onclick = () => startGame();
 function startGame() {
-  if (!golfer.mesh) return;
   audio.unlock();
   $('intro').classList.add('hidden'); $('hud').classList.remove('hidden');
   resetHole();
@@ -1134,5 +1120,10 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-window.__golf = { S, startGame, takeShot, camera, renderer, scene, resetHole, newShotSetup, placeBall, nominal, get golfer() { return golfer; }, gradeSwing, DIFF, audio };
+window.__golf = { S, startGame, takeShot, camera, renderer, scene, resetHole, newShotSetup, placeBall, nominal, golfer, gradeSwing, DIFF, audio };
 if (params.has('clean')) document.body.classList.add('clean');
+if (params.has('play')) {
+  startGame();
+  const pose = params.get('pose');
+  if (pose && pose !== 'overhead') $('confirmBtn').click();
+}
