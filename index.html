@@ -36,17 +36,26 @@
   </div>
   <button id="diffBadge" class="diffBadge" type="button">PRO SWING</button>
   <div id="pinMarker"><div class="pm-dist" id="pinMarkerDist">161y</div><div class="pm-arrow">▼</div></div>
+  <div id="targetTag" class="hidden"><span id="targetTagDist">150</span></div>
 
   <div id="bottomBar">
-    <div id="clubSel">
-      <button id="clubPrev" class="arrowBtn">‹</button>
-      <div id="clubBox"><div id="clubId">8i</div><div id="clubCarry">163 yds</div></div>
-      <button id="clubNext" class="arrowBtn">›</button>
+    <div id="targetCard" class="card hidden">
+      <div class="thint" id="targetHint">DRAG THE RING TO AIM</div>
+      <div class="trow"><span class="lbl">TO TARGET</span><b id="toTarget">—</b></div>
+      <div class="trow"><span class="lbl">TARGET TO PIN</span><b id="targetPin">—</b></div>
     </div>
-    <div id="aimBox">
-      <button id="aimL" class="arrowBtn big">◀</button>
-      <div class="lbl">AIM</div>
-      <button id="aimR" class="arrowBtn big">▶</button>
+    <div id="bottomRow">
+      <div id="clubSel">
+        <button id="clubPrev" class="arrowBtn">‹</button>
+        <div id="clubBox"><div id="clubId">8i</div><div id="clubCarry">163 yds</div></div>
+        <button id="clubNext" class="arrowBtn">›</button>
+      </div>
+      <div id="aimBox">
+        <button id="aimL" class="arrowBtn big">◀</button>
+        <div class="lbl">AIM</div>
+        <button id="aimR" class="arrowBtn big">▶</button>
+      </div>
+      <button id="confirmBtn" class="neonBtn confirmBtn hidden" type="button">CONFIRM</button>
     </div>
   </div>
 
@@ -74,13 +83,6 @@
       <svg id="padTrail" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="padLine" points="" /></svg>
     </div>
   </div>
-
-  <div id="targetCard" class="card hidden">
-    <div class="thint" id="targetHint">DRAG THE RING TO AIM</div>
-    <div class="trow"><span class="lbl">TO TARGET</span><b id="toTarget">—</b></div>
-    <div class="trow"><span class="lbl">TARGET TO PIN</span><b id="targetPin">—</b></div>
-  </div>
-  <button id="confirmBtn" class="neonBtn confirmBtn hidden" type="button">CONFIRM</button>
 
   <div id="gradeCard" class="card hidden">
     <svg id="gradeSvg" viewBox="0 0 64 96" width="54" height="80">

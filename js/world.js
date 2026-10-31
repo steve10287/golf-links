@@ -187,8 +187,10 @@ export function buildWorld(renderer, scene, opts) {
     sun.position.set(x + lightDir.x * 350, lightDir.y * 350, z + lightDir.z * 350);
   };
   W.setShadowCenter(0, -80);
-  const hemi = new THREE.HemisphereLight(0xffb8d8, 0x3a5a20, 0.75);
+  const hemi = new THREE.HemisphereLight(0xffd0e4, 0x6a8a48, 0.75);
   scene.add(hemi);
+  W.hemi = hemi;
+  W.fog = scene.fog;
 
   // ---------- terrain ----------
   const grid = C.buildGrid(mobile ? 260 : 320, mobile ? 306 : 376);

@@ -2,19 +2,22 @@
 // Not a real person and not a third-party character. See README.
 import * as THREE from 'three';
 
-const SKIN = [0.86, 0.66, 0.50];
-const SKIN_SHADOW = [0.72, 0.52, 0.40];
-const POLO = [0.93, 0.95, 0.97];
-const POLO_TRIM = [0.10, 0.22, 0.42];
-const PINK = [0.95, 0.28, 0.58];
-const TROUSER = [0.78, 0.70, 0.56];
-const BELT = [0.12, 0.10, 0.11];
-const SHOE = [0.95, 0.95, 0.96];
-const SOLE = [0.18, 0.16, 0.15];
-const CAP = [0.96, 0.96, 0.98];
-const HAIR = [0.16, 0.11, 0.09];
-const GLOVE = [0.96, 0.96, 0.97];
-const EYE = [0.12, 0.13, 0.16];
+const SKIN = [0.86, 0.62, 0.47];
+const SKIN_SHADOW = [0.62, 0.38, 0.30];
+const POLO = [0.07, 0.14, 0.34];
+const POLO_LIGHT = [0.16, 0.28, 0.52];
+const COLLAR = [0.94, 0.95, 0.97];
+const TROUSER = [0.16, 0.17, 0.20];
+const BELT = [0.08, 0.07, 0.07];
+const SHOE = [0.93, 0.93, 0.95];
+const SOLE = [0.12, 0.11, 0.11];
+const CAP = [0.06, 0.11, 0.28];
+const HAIR = [0.12, 0.08, 0.06];
+const GLOVE = [0.95, 0.95, 0.96];
+const EYE_W = [0.93, 0.93, 0.95];
+const EYE = [0.10, 0.16, 0.22];
+const BROW = [0.18, 0.12, 0.09];
+const LIP = [0.62, 0.36, 0.34];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -72,19 +75,23 @@ function makeBones() {
 function buildGeometry(bones) {
   bones.hips.updateMatrixWorld(true);
   const wp = (name) => new THREE.Vector3().setFromMatrixPosition(bones[name].matrixWorld);
-  const pos = [], nrm = [], col = [], skinI = [], skinW = [], ind = [];
+  const pos = [], nrm = [], col = [], skinI = [], skinW = [], skinAmt = [], ind = [];
 
-  function pushVert(p, n, c, i0, i1, w0) {
+  function pushVert(p, n, c, i0, i1, w0, skin = 0) {
+    const up = n.y * 0.5 + 0.5;
+    const k = skin ? 0.78 + 0.34 * up : 0.82 + 0.26 * up;
     pos.push(p.x, p.y, p.z);
     nrm.push(n.x, n.y, n.z);
-    col.push(c[0], c[1], c[2]);
+    col.push(c[0] * k, c[1] * k, c[2] * k);
     skinI.push(i0, i1, 0, 0);
     const w = clamp(w0, 0, 1);
     skinW.push(w, 1 - w, 0, 0);
+    skinAmt.push(skin);
     return (pos.length / 3) - 1;
   }
 
   function addSegment(aName, bName, r0, r1, c0, c1, opts = {}) {
+    const skin = opts.skin || 0;
     const p0 = wp(aName), p1 = wp(bName);
     const i0 = bones.index[aName], i1 = bones.index[bName];
     const dir = p1.clone().sub(p0);
@@ -106,7 +113,8 @@ function buildGeometry(bones) {
       for (let k = 0; k <= sides; k++) {
         const a = (k / sides) * Math.PI * 2;
         const n = side.clone().multiplyScalar(Math.cos(a)).addScaledVector(up, Math.sin(a)).normalize();
-        pushVert(center.clone().addScaledVector(n, radius), n, color, i0, i1, 1 - t);
+        const along = opts.skinBlend ? (t < 0.42 ? 0 : smooth((t - 0.42) / 0.35)) : skin;
+        pushVert(center.clone().addScaledVector(n, radius), n, color, i0, i1, 1 - t, along);
       }
     }
     const row = sides + 1;
@@ -118,7 +126,7 @@ function buildGeometry(bones) {
     }
   }
 
-  function addSphere(name, center, rx, ry, rz, color, bias = 0) {
+  function addSphere(name, center, rx, ry, rz, color, skin = 0) {
     const i0 = bones.index[name];
     const stacks = 12, sides = 16;
     const base = pos.length / 3;
@@ -130,7 +138,7 @@ function buildGeometry(bones) {
         const u = (k / sides) * Math.PI * 2;
         const n = new THREE.Vector3(Math.cos(u) * rr, sy, Math.sin(u) * rr).normalize();
         const p = new THREE.Vector3(center.x + n.x * rx, center.y + n.y * ry, center.z + n.z * rz);
-        pushVert(p, n, color, i0, i0, 1);
+        pushVert(p, n, color, i0, i0, 1, skin);
       }
     }
     const row = sides + 1;
@@ -140,67 +148,55 @@ function buildGeometry(bones) {
         ind.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
       }
     }
-    if (bias) void bias;
   }
 
   // Torso: pelvis, shirt, chest. Overlapping segments read as one smooth body.
-  addSegment('hips', 'spine', 0.145, 0.132, TROUSER, POLO, { stacks: 6, bulge: 0.06 });
-  addSegment('spine', 'chest', 0.145, 0.175, POLO, POLO, { stacks: 6, bulge: 0.08 });
-  addSegment('chest', 'neck', 0.16, 0.075, POLO, POLO_TRIM, { stacks: 5 });
-  addSegment('neck', 'head', 0.055, 0.07, SKIN_SHADOW, SKIN, { stacks: 4, sides: 12 });
+  addSegment('hips', 'spine', 0.145, 0.132, TROUSER, POLO, { stacks: 6, bulge: 0.04 });
+  addSegment('spine', 'chest', 0.15, 0.178, POLO, POLO_LIGHT, { stacks: 6, bulge: 0.05 });
+  addSegment('chest', 'neck', 0.155, 0.072, POLO, COLLAR, { stacks: 5 });
+  addSegment('neck', 'head', 0.052, 0.064, SKIN_SHADOW, SKIN, { stacks: 4, sides: 14, skin: 1 });
 
-  // Collar ring
   {
     const c = wp('neck');
-    addSphere('neck', c.clone().add(new THREE.Vector3(0, -0.01, 0.01)), 0.085, 0.035, 0.085, POLO_TRIM);
+    addSphere('neck', c.clone().add(new THREE.Vector3(0, 0.01, 0.02)), 0.078, 0.028, 0.08, COLLAR, 0);
   }
 
-  // Head
   const headP = wp('head');
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.04, 0.01)), 0.105, 0.125, 0.112, SKIN);
-  // Ears
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.10, 0.02, 0)), 0.022, 0.034, 0.016, SKIN_SHADOW);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.10, 0.02, 0)), 0.022, 0.034, 0.016, SKIN_SHADOW);
-  // Nose and eyes — generic, not a portrait
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.015, 0.10)), 0.018, 0.022, 0.028, SKIN_SHADOW);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.038, 0.035, 0.09)), 0.014, 0.012, 0.01, EYE);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.038, 0.035, 0.09)), 0.014, 0.012, 0.01, EYE);
-  // Hair at the sides and nape, under the cap
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.02, -0.04)), 0.108, 0.09, 0.09, HAIR);
-  // Cap crown
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.09, -0.005)), 0.118, 0.09, 0.12, CAP);
-  // Brim
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.045, 0.12)), 0.09, 0.012, 0.07, CAP);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.035, 0.012)), 0.102, 0.122, 0.108, SKIN, 1);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0.098, 0.01, 0.01)), 0.018, 0.032, 0.014, SKIN_SHADOW, 1);
+  addSphere('head', headP.clone().add(new THREE.Vector3(-0.098, 0.01, 0.01)), 0.018, 0.032, 0.014, SKIN_SHADOW, 1);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, -0.01, 0.095)), 0.016, 0.026, 0.022, SKIN, 1);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.028, 0.092)), 0.016, 0.012, 0.008, EYE_W, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.028, 0.092)), 0.016, 0.012, 0.008, EYE_W, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.028, 0.100)), 0.007, 0.007, 0.005, EYE, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.028, 0.100)), 0.007, 0.007, 0.005, EYE, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.046, 0.09)), 0.022, 0.006, 0.008, BROW, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.046, 0.09)), 0.022, 0.006, 0.008, BROW, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, -0.04, 0.098)), 0.022, 0.006, 0.008, LIP, 1);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.0, -0.055)), 0.09, 0.07, 0.05, HAIR, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0.07, 0.02, -0.01)), 0.03, 0.05, 0.04, HAIR, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(-0.07, 0.02, -0.01)), 0.03, 0.05, 0.04, HAIR, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.085, -0.01)), 0.112, 0.07, 0.108, CAP, 0);
+  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.048, 0.105)), 0.105, 0.012, 0.055, CAP, 0);
 
-  // Pink side stripe on the shirt, thin
-  addSphere('chest', wp('chest').clone().add(new THREE.Vector3(0.12, -0.02, 0.06)), 0.02, 0.10, 0.02, PINK);
+  addSegment('shoulderL', 'armL', 0.068, 0.055, POLO, POLO, { stacks: 4, sides: 14 });
+  addSegment('armL', 'foreL', 0.058, 0.048, POLO, SKIN, { stacks: 8, skinBlend: true });
+  addSegment('foreL', 'handL', 0.046, 0.036, SKIN, SKIN, { stacks: 7, skin: 1 });
+  addSegment('shoulderR', 'armR', 0.068, 0.055, POLO, POLO, { stacks: 4, sides: 14 });
+  addSegment('armR', 'foreR', 0.058, 0.048, POLO, SKIN, { stacks: 8, skinBlend: true });
+  addSegment('foreR', 'handR', 0.046, 0.036, SKIN, SKIN, { stacks: 7, skin: 1 });
+  addSphere('handL', wp('handL').clone().add(new THREE.Vector3(0, -0.035, 0.012)), 0.034, 0.042, 0.022, GLOVE, 0);
+  addSphere('handR', wp('handR').clone().add(new THREE.Vector3(0, -0.035, 0.012)), 0.032, 0.04, 0.02, SKIN, 1);
 
-  // Arms. Shirt sleeve on the upper third, skin below, glove on the lead hand.
-  addSegment('shoulderL', 'armL', 0.07, 0.055, POLO, POLO, { stacks: 4, sides: 12 });
-  addSegment('armL', 'foreL', 0.062, 0.05, POLO, SKIN, { stacks: 8, bulge: 0.05 });
-  addSegment('foreL', 'handL', 0.048, 0.038, SKIN, SKIN, { stacks: 7 });
-  addSphere('foreL', wp('foreL'), 0.052, 0.052, 0.052, SKIN);
-  addSegment('shoulderR', 'armR', 0.07, 0.055, POLO, POLO, { stacks: 4, sides: 12 });
-  addSegment('armR', 'foreR', 0.062, 0.05, POLO, SKIN, { stacks: 8, bulge: 0.05 });
-  addSegment('foreR', 'handR', 0.048, 0.038, SKIN, SKIN, { stacks: 7 });
-  addSphere('foreR', wp('foreR'), 0.052, 0.052, 0.052, SKIN);
-  // Hands
-  addSphere('handL', wp('handL').clone().add(new THREE.Vector3(0, -0.04, 0.01)), 0.04, 0.055, 0.028, GLOVE);
-  addSphere('handR', wp('handR').clone().add(new THREE.Vector3(0, -0.04, 0.01)), 0.038, 0.05, 0.026, SKIN);
-
-  // Legs, belt, shoes
-  addSphere('hips', wp('hips').clone().add(new THREE.Vector3(0, 0.02, 0)), 0.155, 0.06, 0.12, BELT);
-  addSegment('upLegL', 'legL', 0.09, 0.07, TROUSER, TROUSER, { stacks: 8, bulge: 0.08 });
-  addSegment('legL', 'footL', 0.062, 0.048, TROUSER, TROUSER, { stacks: 7 });
-  addSphere('legL', wp('legL'), 0.07, 0.065, 0.07, TROUSER);
-  addSegment('upLegR', 'legR', 0.09, 0.07, TROUSER, TROUSER, { stacks: 8, bulge: 0.08 });
-  addSegment('legR', 'footR', 0.062, 0.048, TROUSER, TROUSER, { stacks: 7 });
-  addSphere('legR', wp('legR'), 0.07, 0.065, 0.07, TROUSER);
-  // Shoes: sole + upper, point forward (+Z)
+  addSphere('hips', wp('hips').clone().add(new THREE.Vector3(0, 0.03, 0)), 0.148, 0.035, 0.11, BELT, 0);
+  addSegment('upLegL', 'legL', 0.086, 0.064, TROUSER, TROUSER, { stacks: 8, bulge: 0.04 });
+  addSegment('legL', 'footL', 0.06, 0.046, TROUSER, TROUSER, { stacks: 7 });
+  addSegment('upLegR', 'legR', 0.086, 0.064, TROUSER, TROUSER, { stacks: 8, bulge: 0.04 });
+  addSegment('legR', 'footR', 0.06, 0.046, TROUSER, TROUSER, { stacks: 7 });
   for (const foot of ['footL', 'footR']) {
     const f = wp(foot);
-    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.02, 0.06)), 0.055, 0.04, 0.11, SHOE);
-    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.045, 0.06)), 0.058, 0.02, 0.115, SOLE);
+    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.015, 0.07)), 0.05, 0.032, 0.1, SHOE, 0);
+    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.04, 0.07)), 0.052, 0.016, 0.105, SOLE, 0);
   }
 
   const geo = new THREE.BufferGeometry();
@@ -209,6 +205,7 @@ function buildGeometry(bones) {
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinI, 4));
   geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinW, 4));
+  geo.setAttribute('skinAmt', new THREE.Float32BufferAttribute(skinAmt, 1));
   geo.setIndex(ind);
   geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 2.6);
   return geo;
@@ -256,13 +253,26 @@ function makeClub() {
 export function createGolfer() {
   const bones = makeBones();
   const geo = buildGeometry(bones);
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshPhysicalMaterial({
     vertexColors: true,
-    roughness: 0.62,
+    roughness: 0.68,
     metalness: 0.02,
+    sheen: 0.45,
+    sheenColor: new THREE.Color(0xffe4d4),
+    sheenRoughness: 0.55,
     transparent: true,
     opacity: 1,
   });
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float skinAmt;\nvarying float vSkinAmt;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkinAmt = skinAmt;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vSkinAmt;')
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        reflectedLight.indirectDiffuse += vec3(0.10, 0.045, 0.032) * vSkinAmt;
+        reflectedLight.directDiffuse *= mix(vec3(1.0), vec3(1.08, 0.96, 0.92), vSkinAmt);`);
+  };
   const mesh = new THREE.SkinnedMesh(geo, mat);
   mesh.name = 'golfer';
   mesh.castShadow = true;
@@ -428,11 +438,11 @@ export function createGolfer() {
         { g: [0.06, 0.22, 0.60], h: [0.10, 0.04, 0.0] },
       ]
       : [
-        { g: [0.04, 0.20, 0.68], h: [-0.02, 0.04, 0.02] },         // address, clubhead at the ball
-        { g: [0.42, 0.38, 1.52], h: [1.45, 0.18, 1.46] },         // top, shaft parallel and pointing back
-        { g: [0.55, 0.22, 1.46], h: [1.75, 0.05, 1.02] },         // overswing, longer and dropped past parallel
-        { g: [-0.06, 0.12, 0.66], h: [-0.02, 0.03, 0.02] },       // impact
-        { g: [-0.12, -0.06, 1.64], h: [-0.18, -0.28 - path * 0.4, 2.08] }, // high-hands finish
+        { g: [0.04, 0.20, 0.68], h: [-0.02, 0.04, 0.02] },
+        { g: [0.18, 0.22, 1.55], h: [-0.85, 0.22, 1.55] },
+        { g: [0.28, 0.16, 1.48], h: [-1.05, 0.16, 1.12] },
+        { g: [-0.06, 0.12, 0.66], h: [-0.02, 0.03, 0.02] },
+        { g: [-0.12, -0.06, 1.64], h: [-0.18, -0.28 - path * 0.4, 2.08] },
       ];
     const at = (k, which) => {
       const v = which === 'g' ? k.g : k.h;
@@ -503,6 +513,24 @@ export function createGolfer() {
     swingPoints(info, ball, aimYaw);
     const dx = Math.sin(aimYaw), dz = -Math.cos(aimYaw);
     const rx = -dz, rz = dx;
+    // At the top: hands over the trail shoulder, lead arm straight, shaft level and aimed at the target.
+    if (!info.putt && info.s > 0.72 && info.s < 1.35) {
+      const fadeIn = smooth(clamp((info.s - 0.72) / 0.22, 0, 1));
+      const fadeOut = info.s <= 1.02 ? 1 : 1 - clamp((info.s - 1.02) / 0.3, 0, 1);
+      const fade = fadeIn * fadeOut;
+      bones.shoulderR.updateMatrixWorld(true);
+      bones.shoulderL.updateMatrixWorld(true);
+      const trail = _ikS.setFromMatrixPosition(bones.shoulderR.matrixWorld);
+      const lead = _ikAxis.setFromMatrixPosition(bones.shoulderL.matrixWorld);
+      const over = info.power > 1.02 ? clamp((info.s - 1) / 0.28, 0, 1) : 0;
+      const want = _ikElbow.set(trail.x - dx * 0.05 + rx * 0.02, Math.max(trail.y + 0.30, ball.y + 1.48) - over * 0.08, trail.z - dz * 0.05 + rz * 0.02);
+      const reach = _ikDir.subVectors(want, lead);
+      const dist = reach.length();
+      if (dist < 0.5 && dist > 1e-4) want.addScaledVector(reach.multiplyScalar(1 / dist), 0.5 - dist);
+      const head = _ikPole.set(want.x + dx * (0.92 + over * 0.18), want.y - over * 0.42, want.z + dz * (0.92 + over * 0.18));
+      _grip.lerp(want, fade);
+      _headT.lerp(head, fade);
+    }
     // Elbows fold down. Trail elbow a little behind, lead elbow a little toward the target.
     const poleR = _a.set(_grip.x - dx * 0.25 + rx * 0.15, _grip.y - 0.55, _grip.z - dz * 0.25 + rz * 0.15);
     const poleL = _b.set(_grip.x + dx * 0.1 - rx * 0.2, _grip.y - 0.45, _grip.z + dz * 0.1 - rz * 0.2);

@@ -70,10 +70,12 @@ const tracer = new THREE.Mesh(trGeo, new THREE.MeshBasicMaterial({ vertexColors:
 tracer.frustumCulled = false; scene.add(tracer);
 let tracerPts = [];
 
-const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.4, 2.8), transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
-const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 48).rotateX(-Math.PI / 2), ringMat);
-const targetDot = new THREE.Mesh(new THREE.CircleGeometry(0.16, 20).rotateX(-Math.PI / 2), ringMat);
-targetRing.add(targetDot); scene.add(targetRing);
+const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.55, 3.2, 3.6), transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+const haloMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.25, 1.4, 1.6), transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 64).rotateX(-Math.PI / 2), ringMat);
+const targetHalo = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.55, 64).rotateX(-Math.PI / 2), haloMat);
+const targetDot = new THREE.Mesh(new THREE.CircleGeometry(0.22, 24).rotateX(-Math.PI / 2), ringMat);
+targetRing.add(targetDot); targetRing.add(targetHalo); scene.add(targetRing);
 const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6, 8), new THREE.MeshBasicMaterial({ color: 0x9fffff, transparent: true, opacity: 0.28, depthWrite: false, toneMapped: false }));
 scene.add(beacon);
 
@@ -85,8 +87,12 @@ const windHead = new THREE.Mesh(new THREE.ConeGeometry(1.1, 3.2, 10), windMat);
 windHead.rotation.x = Math.PI / 2; windHead.position.z = 11.2;
 windMesh.add(windShaft, windHead); scene.add(windMesh);
 
-const aimDots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.05, 12).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 2.5, 2.5), transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), 40);
+const aimDotMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 3.4, 3.5), transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
+const aimDots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.07, 10).rotateX(-Math.PI / 2), aimDotMat, 48);
 aimDots.frustumCulled = false; scene.add(aimDots);
+const arcMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.5, 0.35), transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
+const arcDots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.55, 8, 6), arcMat, 32);
+arcDots.frustumCulled = false; scene.add(arcDots);
 
 const chevGeo = new THREE.BufferGeometry();
 chevGeo.setAttribute('position', new THREE.Float32BufferAttribute([-0.16, 0, 0.1, 0, 0, -0.12, 0.16, 0, 0.1, 0.16, 0, 0.18, 0, 0, -0.04, -0.16, 0, 0.18], 3));
@@ -320,15 +326,31 @@ function updateAimVisuals() {
   windMesh.visible = S.phase === 'overhead';
   chev.visible = putting && S.phase === 'aim';
   aimDots.visible = S.phase === 'aim' || S.phase === 'overhead';
+  arcDots.visible = S.phase === 'overhead' && !!S.target;
   const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
   const full = S.phase === 'overhead' && S.target ? Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z) : (putting ? Math.min(distToPin(), 6) : 8);
-  for (let i = 0; i < 40; i++) {
-    const t = 0.35 + (i / 39) * full;
-    const x = S.ball.x + dx * t, z = S.ball.z + dz * t;
-    m.makeTranslation(x, course.heightAt(x, z) + 0.03, z);
+  const dotScale = S.phase === 'overhead' ? 7 : 1;
+  const qid = new THREE.Quaternion();
+  const sv = new THREE.Vector3(dotScale, dotScale, dotScale);
+  for (let i = 0; i < 48; i++) {
+    const t = (i + 0.5) / 48;
+    const x = S.ball.x + dx * full * t, z = S.ball.z + dz * full * t;
+    m.compose(new THREE.Vector3(x, course.heightAt(x, z) + 0.08, z), qid, sv);
     aimDots.setMatrixAt(i, m);
   }
   aimDots.instanceMatrix.needsUpdate = true;
+  if (arcDots.visible) {
+    const apex = Math.max(12, full * 0.38);
+    const as = new THREE.Vector3(1, 1, 1);
+    for (let i = 0; i < 32; i++) {
+      const t = (i + 0.5) / 32;
+      const x = S.ball.x + dx * full * t, z = S.ball.z + dz * full * t;
+      const y = course.heightAt(x, z) + Math.sin(t * Math.PI) * apex;
+      m.compose(new THREE.Vector3(x, y, z), qid, as);
+      arcDots.setMatrixAt(i, m);
+    }
+    arcDots.instanceMatrix.needsUpdate = true;
+  }
   if (showTarget) {
     const c = S.target;
     const y = course.heightAt(c.x, c.z);
@@ -337,7 +359,7 @@ function updateAimVisuals() {
     _v.set(n.x, n.y, n.z);
     targetRing.quaternion.setFromUnitVectors(upVec, _v);
     const yards = dispersionYards(S.difficulty, S.clubIdx);
-    const radius = Math.max(1.15, yards / YD);
+    const radius = Math.max(S.phase === 'overhead' ? 6.5 : 1.6, yards / YD);
     targetRing.scale.setScalar(radius);
     beacon.position.set(c.x, y + 3.1, c.z);
     beacon.scale.set(1, Math.max(0.6, radius * 0.35), 1);
@@ -348,9 +370,11 @@ function updateAimVisuals() {
     beacon.material.color.copy(ringColor);
   }
   if (S.phase === 'overhead') {
-    const wx = S.ball.x + 16, wz = S.ball.z + 6;
-    windMesh.position.set(wx, course.heightAt(wx, wz) + 0.5, wz);
+    const mx = (S.ball.x + C.PIN.x) * 0.5 - 28;
+    const mz = (S.ball.z + C.PIN.z) * 0.45;
+    windMesh.position.set(mx, course.heightAt(mx, mz) + 1.2, mz);
     windMesh.rotation.y = Math.atan2(S.wind.x, S.wind.z);
+    windMesh.scale.setScalar(1.6);
   }
 }
 
@@ -603,14 +627,16 @@ function setCamOverhead() {
   const aspect = Math.max(0.38, camera.aspect);
   const vFov = (camera.aspect < 1 ? 62 : 50) * Math.PI / 180;
   const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-  const halfLen = span * 0.62 + 16;
-  const halfWid = Math.max(42, span * 0.34);
-  const dist = Math.max(halfLen / Math.tan(vFov / 2), halfWid / Math.tan(hFov / 2), 60);
-  const back = dist * 0.16;
+  const halfLen = span * 0.78 + 42;
+  const halfWid = Math.max(64, span * 0.46);
+  const dist = Math.max(halfLen / Math.tan(vFov / 2), halfWid / Math.tan(hFov / 2), 78);
   const gy = course.heightAt(mx, mz);
-  camPosT.set(mx - dx * back, gy + dist * 0.94, mz - dz * back);
-  camLookT.set(mx + dx * dist * 0.02, gy, mz + dz * dist * 0.02);
-  camUpT.set(dx, 0.18, dz).normalize();
+  const lookX = b.x + (p.x - b.x) * 0.40;
+  const lookZ = b.z + (p.z - b.z) * 0.40;
+  const back = dist * 0.62;
+  camPosT.set(lookX - dx * back, gy + dist * 0.52, lookZ - dz * back);
+  camLookT.set(lookX, course.heightAt(lookX, lookZ), lookZ);
+  camUpT.set(dx, 0.08, dz).normalize();
 }
 
 function sampleShot(t) {
@@ -882,15 +908,35 @@ function autoPerf(dt) {
 
 const pm = $('pinMarker'), pmd = $('pinMarkerDist');
 const pinTop = new THREE.Vector3(C.PIN.x, course.heightAt(C.PIN.x, C.PIN.z) + 2.5, C.PIN.z);
+function projectTag(el, world, show) {
+  if (!show) { el.classList.add('hidden'); return; }
+  const v = world.clone().project(camera);
+  if (v.z > 1) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
+  el.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
+}
+const targetWorld = new THREE.Vector3();
 function updatePinMarker() {
-  const show = (S.phase === 'aim' || S.phase === 'overhead') && distToPin() > 12;
-  if (!show) { pm.style.display = 'none'; return; }
-  const v = pinTop.clone().project(camera);
-  if (v.z > 1) { pm.style.display = 'none'; return; }
-  pm.style.display = 'block';
-  pm.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
-  pm.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
-  pmd.textContent = (distToPin() * YD).toFixed(0) + 'y';
+  const show = S.phase === 'aim' && distToPin() > 12;
+  if (!show) pm.style.display = 'none';
+  else {
+    const v = pinTop.clone().project(camera);
+    if (v.z > 1) pm.style.display = 'none';
+    else {
+      pm.style.display = 'block';
+      pm.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
+      pm.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
+      pmd.textContent = (distToPin() * YD).toFixed(0) + 'y';
+    }
+  }
+  const tag = $('targetTag');
+  if (S.target && (S.phase === 'overhead' || S.phase === 'aim') && !isPutting()) {
+    const yds = Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z) * YD;
+    $('targetTagDist').textContent = yds.toFixed(0) + ' yds';
+    targetWorld.set(S.target.x, course.heightAt(S.target.x, S.target.z) + 1.2, S.target.z);
+    projectTag(tag, targetWorld, true);
+  } else tag.classList.add('hidden');
 }
 
 const clock = new THREE.Clock();
@@ -967,7 +1013,20 @@ function frame() {
   blob.material.opacity = Math.max(0, 1 - hAbove / 25);
   blob.visible = ball.visible && gh > C.WATER_LEVEL;
   updateTracer();
-  if (ringMat && targetRing.visible) ringMat.opacity = 0.62 + 0.28 * Math.sin(elapsed * 4);
+  if (ringMat && targetRing.visible) {
+    const pulse = 0.72 + 0.28 * Math.sin(elapsed * 4);
+    ringMat.opacity = pulse;
+    haloMat.opacity = 0.28 + 0.2 * Math.sin(elapsed * 4);
+  }
+  const over = S.phase === 'overhead' ? 1 : 0;
+  renderer.toneMappingExposure = 0.62 + over * 0.7;
+  if (scene.fog) scene.fog.density = 0.001 - over * 0.00086;
+  if (W.hemi) W.hemi.intensity = 0.75 + over * 1.55;
+  if (W.sun) {
+    W.sun.intensity = 3.2 + over * 1.5;
+    if (W.sun.shadow) W.sun.shadow.radius = over ? 8 : 3;
+    if (W.sun.shadow && W.sun.shadow.intensity !== undefined) W.sun.shadow.intensity = over ? 0.35 : 1;
+  }
   if (chev.visible) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sv = new THREE.Vector3(0.65, 0.65, 0.65);
     chevPts.forEach((c, i) => {
