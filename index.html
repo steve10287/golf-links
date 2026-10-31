@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#1a0b24" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E⛳%3C/text%3E%3C/svg%3E" />
+<title>Vice Links — Par 3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Yellowtail&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{ "imports": { "three": "./js/lib/three.module.min.js", "three/addons/": "./js/lib/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="fx"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="holeCard" class="card">
+    <div class="row1"><span class="hole">HOLE 1</span><span class="par">PAR 3</span></div>
+    <div class="row2"><span id="holeYds">161 YDS</span> · <span id="strokeLbl">STROKE 1</span></div>
+    <div class="row3" id="lieLbl">Lie: Tee</div>
+  </div>
+  <div id="topRight">
+    <div class="card small" id="windCard"><div id="windArrow">➤</div><div><div class="lbl">WIND</div><div id="windVal">3 mph</div></div></div>
+    <div class="card small"><div class="lbl">TO PIN</div><div id="toPin">161 yds</div></div>
+    <button id="resetBtn" class="iconBtn" title="Restart hole">↺</button>
+    <button id="settingsBtn" class="iconBtn" title="Settings">⚙</button>
+  </div>
+  <div id="pinMarker"><div class="pm-dist" id="pinMarkerDist">161y</div><div class="pm-arrow">▼</div></div>
+
+  <div id="bottomBar">
+    <div id="clubSel">
+      <button id="clubPrev" class="arrowBtn">‹</button>
+      <div id="clubBox"><div id="clubId">8i</div><div id="clubCarry">163 yds</div></div>
+      <button id="clubNext" class="arrowBtn">›</button>
+    </div>
+    <div id="aimBox">
+      <button id="aimL" class="arrowBtn big">◀</button>
+      <div class="lbl">AIM</div>
+      <button id="aimR" class="arrowBtn big">▶</button>
+    </div>
+  </div>
+
+  <div id="swingArea">
+    <div id="meter"><div id="meterFill"></div><div id="meterMark"></div><div id="meterTarget"></div><div id="meterLbl">0%</div></div>
+    <div id="swingPad">
+      <div class="padHint" id="padHint">PULL DOWN<br/>then FLICK UP</div>
+      <div id="padDot"></div>
+      <svg id="padTrail" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="padLine" points="" /></svg>
+    </div>
+    <button id="motionBtn" class="hidden"><span id="motionBtnTxt">HOLD &amp; SWING</span><small id="motionSub">hold phone like a club</small></button>
+  </div>
+
+  <div id="shotInfo" class="card hidden"></div>
+  <div id="toast" class="hidden"></div>
+</div>
+
+<div id="bigMsg" class="hidden"><div id="bigTitle">HOLE IN ONE!</div><div id="bigSub"></div><div id="bigBtns"><button id="againBtn" class="neonBtn">PLAY AGAIN</button></div></div>
+
+<div id="intro">
+  <div class="introInner">
+    <div class="logo">Vice Links</div>
+    <div class="tag">OCEAN DRIVE GOLF CLUB · HOLE 1 · PAR 3</div>
+    <button id="motionStart" class="neonBtn">⛳ ENABLE MOTION SWING</button>
+    <button id="touchStart" class="ghostBtn">PLAY WITH TOUCH</button>
+    <div class="howto">
+      <b>Motion:</b> grip your phone like a club, screen facing you, thumb on the button. Hold it, take it back, then swing through. Swing speed = power, twisting your wrists at impact opens or closes the face.<br/>
+      <b>Touch:</b> drag down on the swing pad to take it back, then flick straight up. Drift left or right on the way up to hook or slice.
+    </div>
+    <div id="loadMsg">Loading course…</div>
+  </div>
+</div>
+
+<div id="settings" class="hidden">
+  <div class="card settingsCard">
+    <h3>Settings</h3>
+    <label>Motion swing strength
+      <select id="sensSel"><option value="550">Easy (gentle swing)</option><option value="850" selected>Normal</option><option value="1300">Pro (full speed)</option></select></label>
+    <label><input type="checkbox" id="assistChk" checked /> Swing assist (smaller hooks and slices)</label>
+    <label>Graphics
+      <select id="qualSel"><option value="auto" selected>Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
+    <div class="row"><button id="useMotion" class="ghostBtn">Use motion</button><button id="useTouch" class="ghostBtn">Use touch</button></div>
+    <button id="closeSettings" class="neonBtn">DONE</button>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
