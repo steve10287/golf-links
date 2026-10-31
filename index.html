@@ -18,6 +18,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="veil"></div>
 <canvas id="fx"></canvas>
 
 <div id="hud" class="hidden">
@@ -28,12 +29,9 @@
   </div>
   <div id="topRight">
     <div class="card small" id="windCard"><div id="windArrow">➤</div><div><div class="lbl">WIND</div><div id="windVal">3 mph</div></div></div>
-    <div class="card small" id="streakCard"><div class="lbl">STREAK</div><div id="streakVal">0</div></div>
-    <div class="card small"><div class="lbl">TO PIN</div><div id="toPin">161 yds</div></div>
-    <button id="retryBtn" class="iconBtn" title="Retry last shot" hidden>↩</button>
-    <button id="resetBtn" class="iconBtn" title="Restart hole">↺</button>
-    <button id="settingsBtn" class="iconBtn" title="Settings">⚙</button>
-    <button id="eyeBtn" class="eyeBtn hidden" type="button">BIRD'S EYE</button>
+    <div class="card small" id="streakCard" hidden><div class="lbl">STREAK</div></div>
+    <div class="card small" id="pinCard"><div class="lbl">TO PIN</div><div id="toPin">161 yds</div></div>
+    <button id="settingsBtn" class="iconBtn" title="Menu" type="button">···</button>
   </div>
   <button id="diffBadge" class="diffBadge" type="button">PRO SWING</button>
   <div id="pinMarker"><div class="pm-dist" id="pinMarkerDist">161y</div><div class="pm-arrow">▼</div></div>
@@ -117,8 +115,8 @@
     <div class="tag">OCEAN DRIVE GOLF CLUB · HOLE 1 · PAR 3</div>
     <button id="playBtn" class="neonBtn">PLAY</button>
     <div class="howto">
-      <b>Aim:</b> before each full shot the camera flies overhead. Drag the glowing target, then tap Confirm.<br/>
-      <b>Swing:</b> drag down on the pad for power, then push straight up through the ball. Tempo, path, and the change of direction are graded. Past 100% is an overswing.<br/>
+      <b>Aim:</b> drag sideways. The camera flies out to the landing spot and comes back when you let go.<br/>
+      <b>Swing:</b> drag down on the lower screen, then straight up. The line ticks when you are on path.<br/>
       <b>Pro Swing</b> is the default: tight windows, no assist. A PERFECT swing finds the target.
     </div>
     <div id="loadMsg"></div>
@@ -138,6 +136,14 @@
     <label>Graphics
       <select id="qualSel"><option value="auto" selected>Auto</option><option value="high">High</option><option value="low">Battery saver</option></select></label>
     <label><input type="checkbox" id="muteChk" /> Mute audio</label>
+    <label><input type="checkbox" id="hapticChk" checked /> Haptics</label>
+    <p class="credits">Android uses vibration. iPhone uses the iOS switch tick when the browser supports it. There is no tick if the phone blocks both.</p>
+    <div id="menuStreak">Perfect streak <b id="streakVal">0</b></div>
+    <button id="retryBtn" class="ghostBtn" type="button">Retry last shot</button>
+    <button id="resetBtn" class="ghostBtn" type="button">Restart hole</button>
+    <button id="eyeBtn" class="ghostBtn" type="button">Hole map</button>
+    <button id="rangeBtn" class="ghostBtn" type="button">Range / Physics Lab</button>
+    <button id="leaveRange" class="ghostBtn" type="button">Back to the hole</button>
     <button id="closeSettings" class="neonBtn">DONE</button>
   </div>
 </div>

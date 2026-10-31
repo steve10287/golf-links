@@ -1,659 +1,505 @@
-// Original procedural golfer: one skinned mesh, smooth limbs, golf clothes.
-// Not a real person and not a third-party character. See README.
+// Mannequin driven directly by CMU motion capture. No walk cycle and no
+// retarget onto a clothed mesh. Takes: 64_06 full swing, 64_13 putt.
+// Frame 0 of each file is a T-pose added by the BVH conversion, not the swing.
+// See assets/mocap/CREDIT.txt.
 import * as THREE from 'three';
+import { parseBVH, jointQuaternion, rootPosition } from './bvh.js';
 
-const SKIN = [0.86, 0.62, 0.47];
-const SKIN_SHADOW = [0.62, 0.38, 0.30];
-const POLO = [0.07, 0.14, 0.34];
-const POLO_LIGHT = [0.16, 0.28, 0.52];
-const COLLAR = [0.94, 0.95, 0.97];
-const TROUSER = [0.16, 0.17, 0.20];
-const BELT = [0.08, 0.07, 0.07];
-const SHOE = [0.93, 0.93, 0.95];
-const SOLE = [0.12, 0.11, 0.11];
-const CAP = [0.06, 0.11, 0.28];
-const HAIR = [0.12, 0.08, 0.06];
-const GLOVE = [0.95, 0.95, 0.96];
-const EYE_W = [0.93, 0.93, 0.95];
-const EYE = [0.10, 0.16, 0.22];
-const BROW = [0.18, 0.12, 0.09];
-const LIP = [0.62, 0.36, 0.34];
+const UP = new THREE.Vector3(0, 1, 0);
+const DOWN = new THREE.Vector3(0, -1, 0);
+const AX = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+const STATURE = 1.8;
+const GRIP = 0.09;
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const lerp = (a, b, t) => a + (b - a) * t;
-const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
-const _hand = new THREE.Vector3();
-const _handQ = new THREE.Quaternion();
-const _dir = new THREE.Vector3();
-const _down = new THREE.Vector3(0, -1, 0);
-const _desired = new THREE.Quaternion();
-const _roll = new THREE.Quaternion();
-const _a = new THREE.Vector3();
-const _b = new THREE.Vector3();
-const _c = new THREE.Vector3();
-const _d = new THREE.Vector3();
+const PHASE = {
+  swing: { address: 102, top: 192, impact: 253, finish: 355 },
+  putt: { address: 80, top: 183, impact: 252, finish: 340 },
+};
 
-function makeBones() {
-  const b = {};
-  const add = (name, parent, x, y, z) => {
-    const bone = new THREE.Bone();
-    bone.name = name;
-    bone.position.set(x, y, z);
-    parent.add(bone);
-    b[name] = bone;
-    return bone;
-  };
-  const hips = new THREE.Bone();
-  hips.name = 'hips';
-  hips.position.set(0, 0.98, 0);
-  b.hips = hips;
-  add('spine', hips, 0, 0.12, 0);
-  add('chest', b.spine, 0, 0.16, 0.012);
-  add('neck', b.chest, 0, 0.20, 0.01);
-  add('head', b.neck, 0, 0.10, 0.015);
-  add('shoulderL', b.chest, 0.17, 0.13, 0.01);
-  add('armL', b.shoulderL, 0.10, -0.03, 0);
-  add('foreL', b.armL, 0.01, -0.28, 0);
-  add('handL', b.foreL, 0, -0.25, 0);
-  add('shoulderR', b.chest, -0.17, 0.13, 0.01);
-  add('armR', b.shoulderR, -0.10, -0.03, 0);
-  add('foreR', b.armR, -0.01, -0.28, 0);
-  add('handR', b.foreR, 0, -0.25, 0);
-  add('upLegL', hips, 0.10, -0.07, 0);
-  add('legL', b.upLegL, 0, -0.43, 0);
-  add('footL', b.legL, 0, -0.41, 0.02);
-  add('upLegR', hips, -0.10, -0.07, 0);
-  add('legR', b.upLegR, 0, -0.43, 0);
-  add('footR', b.legR, 0, -0.41, 0.02);
-  const list = [];
-  hips.traverse((o) => { if (o.isBone) list.push(o); });
-  b.list = list;
-  b.index = Object.fromEntries(list.map((bone, i) => [bone.name, i]));
-  return b;
+const qA = new THREE.Quaternion();
+const qB = new THREE.Quaternion();
+const qT = new THREE.Quaternion();
+const v1 = new THREE.Vector3();
+const v2 = new THREE.Vector3();
+const v3 = new THREE.Vector3();
+const v4 = new THREE.Vector3();
+const s1 = new THREE.Vector3();
+const s2 = new THREE.Vector3();
+const s3 = new THREE.Vector3();
+
+function loadText(file) {
+  return fetch(new URL('../assets/mocap/' + file, import.meta.url)).then((r) => {
+    if (!r.ok) throw new Error(file + ' ' + r.status);
+    return r.text();
+  });
 }
 
-function buildGeometry(bones) {
-  bones.hips.updateMatrixWorld(true);
-  const wp = (name) => new THREE.Vector3().setFromMatrixPosition(bones[name].matrixWorld);
-  const pos = [], nrm = [], col = [], skinI = [], skinW = [], skinAmt = [], ind = [];
-
-  function pushVert(p, n, c, i0, i1, w0, skin = 0) {
-    const up = n.y * 0.5 + 0.5;
-    const k = skin ? 0.78 + 0.34 * up : 0.82 + 0.26 * up;
-    pos.push(p.x, p.y, p.z);
-    nrm.push(n.x, n.y, n.z);
-    col.push(c[0] * k, c[1] * k, c[2] * k);
-    skinI.push(i0, i1, 0, 0);
-    const w = clamp(w0, 0, 1);
-    skinW.push(w, 1 - w, 0, 0);
-    skinAmt.push(skin);
-    return (pos.length / 3) - 1;
-  }
-
-  function addSegment(aName, bName, r0, r1, c0, c1, opts = {}) {
-    const skin = opts.skin || 0;
-    const p0 = wp(aName), p1 = wp(bName);
-    const i0 = bones.index[aName], i1 = bones.index[bName];
-    const dir = p1.clone().sub(p0);
-    const len = dir.length() || 1;
-    dir.multiplyScalar(1 / len);
-    const helper = Math.abs(dir.y) > 0.85 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-    const side = new THREE.Vector3().crossVectors(helper, dir).normalize();
-    const up = new THREE.Vector3().crossVectors(dir, side).normalize();
-    const sides = opts.sides || 16;
-    const stacks = opts.stacks || 8;
-    const base = pos.length / 3;
-    for (let s = 0; s <= stacks; s++) {
-      const t = s / stacks;
-      const center = p0.clone().lerp(p1, t);
-      const radius = lerp(r0, r1, t) * (opts.bulge ? 1 + opts.bulge * Math.sin(t * Math.PI) : 1);
-      const color = [
-        lerp(c0[0], c1[0], t), lerp(c0[1], c1[1], t), lerp(c0[2], c1[2], t),
-      ];
-      for (let k = 0; k <= sides; k++) {
-        const a = (k / sides) * Math.PI * 2;
-        const n = side.clone().multiplyScalar(Math.cos(a)).addScaledVector(up, Math.sin(a)).normalize();
-        const along = opts.skinBlend ? (t < 0.42 ? 0 : smooth((t - 0.42) / 0.35)) : skin;
-        pushVert(center.clone().addScaledVector(n, radius), n, color, i0, i1, 1 - t, along);
-      }
-    }
-    const row = sides + 1;
-    for (let s = 0; s < stacks; s++) {
-      for (let k = 0; k < sides; k++) {
-        const a = base + s * row + k;
-        ind.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
-      }
-    }
-  }
-
-  function addSphere(name, center, rx, ry, rz, color, skin = 0) {
-    const i0 = bones.index[name];
-    const stacks = 12, sides = 16;
-    const base = pos.length / 3;
-    for (let s = 0; s <= stacks; s++) {
-      const v = s / stacks;
-      const phi = v * Math.PI;
-      const sy = Math.cos(phi), rr = Math.sin(phi);
-      for (let k = 0; k <= sides; k++) {
-        const u = (k / sides) * Math.PI * 2;
-        const n = new THREE.Vector3(Math.cos(u) * rr, sy, Math.sin(u) * rr).normalize();
-        const p = new THREE.Vector3(center.x + n.x * rx, center.y + n.y * ry, center.z + n.z * rz);
-        pushVert(p, n, color, i0, i0, 1, skin);
-      }
-    }
-    const row = sides + 1;
-    for (let s = 0; s < stacks; s++) {
-      for (let k = 0; k < sides; k++) {
-        const a = base + s * row + k;
-        ind.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
-      }
-    }
-  }
-
-  // Torso: pelvis, shirt, chest. Overlapping segments read as one smooth body.
-  addSegment('hips', 'spine', 0.145, 0.132, TROUSER, POLO, { stacks: 6, bulge: 0.04 });
-  addSegment('spine', 'chest', 0.15, 0.178, POLO, POLO_LIGHT, { stacks: 6, bulge: 0.05 });
-  addSegment('chest', 'neck', 0.155, 0.072, POLO, COLLAR, { stacks: 5 });
-  addSegment('neck', 'head', 0.052, 0.064, SKIN_SHADOW, SKIN, { stacks: 4, sides: 14, skin: 1 });
-
-  {
-    const c = wp('neck');
-    addSphere('neck', c.clone().add(new THREE.Vector3(0, 0.01, 0.02)), 0.078, 0.028, 0.08, COLLAR, 0);
-  }
-
-  const headP = wp('head');
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.035, 0.012)), 0.102, 0.122, 0.108, SKIN, 1);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.098, 0.01, 0.01)), 0.018, 0.032, 0.014, SKIN_SHADOW, 1);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.098, 0.01, 0.01)), 0.018, 0.032, 0.014, SKIN_SHADOW, 1);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, -0.01, 0.095)), 0.016, 0.026, 0.022, SKIN, 1);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.028, 0.092)), 0.016, 0.012, 0.008, EYE_W, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.028, 0.092)), 0.016, 0.012, 0.008, EYE_W, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.028, 0.100)), 0.007, 0.007, 0.005, EYE, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.028, 0.100)), 0.007, 0.007, 0.005, EYE, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.034, 0.046, 0.09)), 0.022, 0.006, 0.008, BROW, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.034, 0.046, 0.09)), 0.022, 0.006, 0.008, BROW, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, -0.04, 0.098)), 0.022, 0.006, 0.008, LIP, 1);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.0, -0.055)), 0.09, 0.07, 0.05, HAIR, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0.07, 0.02, -0.01)), 0.03, 0.05, 0.04, HAIR, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(-0.07, 0.02, -0.01)), 0.03, 0.05, 0.04, HAIR, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.085, -0.01)), 0.112, 0.07, 0.108, CAP, 0);
-  addSphere('head', headP.clone().add(new THREE.Vector3(0, 0.048, 0.105)), 0.105, 0.012, 0.055, CAP, 0);
-
-  addSegment('shoulderL', 'armL', 0.068, 0.055, POLO, POLO, { stacks: 4, sides: 14 });
-  addSegment('armL', 'foreL', 0.058, 0.048, POLO, SKIN, { stacks: 8, skinBlend: true });
-  addSegment('foreL', 'handL', 0.046, 0.036, SKIN, SKIN, { stacks: 7, skin: 1 });
-  addSegment('shoulderR', 'armR', 0.068, 0.055, POLO, POLO, { stacks: 4, sides: 14 });
-  addSegment('armR', 'foreR', 0.058, 0.048, POLO, SKIN, { stacks: 8, skinBlend: true });
-  addSegment('foreR', 'handR', 0.046, 0.036, SKIN, SKIN, { stacks: 7, skin: 1 });
-  addSphere('handL', wp('handL').clone().add(new THREE.Vector3(0, -0.035, 0.012)), 0.034, 0.042, 0.022, GLOVE, 0);
-  addSphere('handR', wp('handR').clone().add(new THREE.Vector3(0, -0.035, 0.012)), 0.032, 0.04, 0.02, SKIN, 1);
-
-  addSphere('hips', wp('hips').clone().add(new THREE.Vector3(0, 0.03, 0)), 0.148, 0.035, 0.11, BELT, 0);
-  addSegment('upLegL', 'legL', 0.086, 0.064, TROUSER, TROUSER, { stacks: 8, bulge: 0.04 });
-  addSegment('legL', 'footL', 0.06, 0.046, TROUSER, TROUSER, { stacks: 7 });
-  addSegment('upLegR', 'legR', 0.086, 0.064, TROUSER, TROUSER, { stacks: 8, bulge: 0.04 });
-  addSegment('legR', 'footR', 0.06, 0.046, TROUSER, TROUSER, { stacks: 7 });
-  for (const foot of ['footL', 'footR']) {
-    const f = wp(foot);
-    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.015, 0.07)), 0.05, 0.032, 0.1, SHOE, 0);
-    addSphere(foot, f.clone().add(new THREE.Vector3(0, -0.04, 0.07)), 0.052, 0.016, 0.105, SOLE, 0);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinI, 4));
-  geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinW, 4));
-  geo.setAttribute('skinAmt', new THREE.Float32BufferAttribute(skinAmt, 1));
-  geo.setIndex(ind);
-  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1.0, 0), 2.6);
-  return geo;
-}
-
-function makeClub() {
-  const g = new THREE.Group();
-  g.name = 'club';
-  const shaftMat = new THREE.MeshStandardMaterial({ color: 0x2a2e33, metalness: 0.85, roughness: 0.32 });
-  const gripMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.9, metalness: 0 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0xd5d8df, metalness: 0.92, roughness: 0.22 });
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.0075, 0.92, 10), shaftMat);
-  shaft.position.y = -0.50;
-  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.015, 0.27, 10), gripMat);
-  grip.position.y = -0.12;
-  const hosel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.07, 8), steel);
-  hosel.position.y = -0.96;
-  hosel.name = 'hosel';
-  // Iron blade: a thin swept head, not a cube
-  const ironShape = new THREE.Shape();
-  ironShape.moveTo(0, 0);
-  ironShape.lineTo(0.018, -0.01);
-  ironShape.lineTo(0.055, -0.012);
-  ironShape.lineTo(0.07, 0.01);
-  ironShape.lineTo(0.045, 0.055);
-  ironShape.lineTo(0.01, 0.05);
-  ironShape.lineTo(0, 0.02);
-  const ironGeo = new THREE.ExtrudeGeometry(ironShape, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, steps: 1 });
-  ironGeo.translate(-0.01, -0.02, -0.006);
-  const iron = new THREE.Mesh(ironGeo, steel);
-  iron.position.set(0.01, -0.98, 0);
-  iron.name = 'ironHead';
-  const wedge = iron.clone();
-  wedge.scale.set(1.15, 0.92, 1.35);
-  wedge.name = 'wedgeHead';
-  const putterGeo = new THREE.BoxGeometry(0.11, 0.028, 0.03);
-  const putter = new THREE.Mesh(putterGeo, steel);
-  putter.position.set(0.02, -0.90, 0);
-  putter.name = 'putterHead';
-  g.add(shaft, grip, hosel, iron, wedge, putter);
-  g.userData.parts = { shaft, iron, wedge, putter, hosel };
-  return g;
+function quatAngle(a, b) {
+  const d = Math.abs(a.dot(b));
+  return 2 * Math.acos(Math.min(1, d));
 }
 
 export function createGolfer() {
-  const bones = makeBones();
-  const geo = buildGeometry(bones);
-  const mat = new THREE.MeshPhysicalMaterial({
-    vertexColors: true,
-    roughness: 0.68,
-    metalness: 0.02,
-    sheen: 0.45,
-    sheenColor: new THREE.Color(0xffe4d4),
-    sheenRoughness: 0.55,
-    transparent: true,
-    opacity: 1,
-  });
-  mat.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float skinAmt;\nvarying float vSkinAmt;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSkinAmt = skinAmt;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vSkinAmt;')
-      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
-        reflectedLight.indirectDiffuse += vec3(0.10, 0.045, 0.032) * vSkinAmt;
-        reflectedLight.directDiffuse *= mix(vec3(1.0), vec3(1.08, 0.96, 0.92), vSkinAmt);`);
-  };
-  const mesh = new THREE.SkinnedMesh(geo, mat);
-  mesh.name = 'golfer';
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.frustumCulled = false;
-  mesh.add(bones.hips);
-  const skeleton = new THREE.Skeleton(bones.list);
-  mesh.updateMatrixWorld(true);
-  mesh.bind(skeleton);
+  const anchor = new THREE.Group();
+  anchor.name = 'golfer';
+  const rig = new THREE.Group();
+  anchor.add(rig);
 
-  const club = makeClub();
-  bones.handL.add(club);
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xe4ded4, roughness: 0.62, metalness: 0.02 });
+  const jointMat = new THREE.MeshStandardMaterial({ color: 0xb08d57, roughness: 0.38, metalness: 0.42 });
+  const shaftMat = new THREE.MeshStandardMaterial({ color: 0x2c3136, roughness: 0.32, metalness: 0.72 });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xd5dbe2, roughness: 0.28, metalness: 0.6 });
 
-  const pose = {
-    s: 0, power: 0, path: 0, putt: false, club: '8i',
-    walking: false, walkPhase: 0, opacity: 0,
-  };
+  const segments = [];
+  const spheres = [];
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.007, 1, 12), shaftMat);
+  shaft.geometry.translate(0, -0.5, 0);
+  shaft.frustumCulled = false;
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.014), headMat);
+  const putterHead = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.02, 0.03), headMat);
+  blade.frustumCulled = false;
+  putterHead.frustumCulled = false;
+  anchor.add(shaft, blade, putterHead);
 
-  function setClub(id) {
-    if (pose.club === id) return;
-    pose.club = id;
-    const parts = club.userData.parts;
-    const putter = id === 'PT';
-    const wedge = id === 'PW' || id === 'SW';
-    parts.iron.visible = !putter && !wedge;
-    parts.wedge.visible = wedge;
-    parts.putter.visible = putter;
-    const len = putter ? 0.84 : wedge ? 0.90 : 0.97;
-    parts.shaft.scale.y = len / 0.92;
-    parts.shaft.position.y = -0.08 - (len / 2);
-    parts.hosel.position.y = -0.08 - len;
-    parts.iron.position.y = -0.06 - len;
-    parts.wedge.position.y = -0.06 - len;
-    parts.putter.position.y = -0.05 - len * 0.96;
-  }
+  const pose = { s: 0, walking: false, putt: false, ready: false, take: '64_06', metrics: null };
+  let swing = null;
+  let putt = null;
+  let active = null;
 
-  function applySwing(s, power, path, putt, time) {
-    const over = clamp((Math.min(power, s) - 1) / 0.22, 0, 1);
-    const B = bones;
-    // Neutralise then pose. Rotations are offsets from the bind pose.
-    for (const bone of bones.list) bone.rotation.set(0, 0, 0);
-
-    let shoulderY, hipY, spineX, wrist, knee, elbow, sideBend, finishStand;
-    if (s <= 1.25) {
-      const t = smooth(clamp(s / 1, 0, 1));
-      const turn = putt ? 0.42 : 1.62;
-      shoulderY = -turn * t - (putt ? 0 : 0.28 * over);
-      hipY = shoulderY * (putt ? 0.06 : 0.40);
-      spineX = lerp(putt ? 0.28 : 0.58, putt ? 0.22 : 0.42, t);
-      // Wrist cock arrives in the second half of the takeaway. One-piece early.
-      const cockT = smooth(clamp((s - 0.28) / 0.72, 0, 1));
-      wrist = (putt ? 0.18 : 1.05) * cockT + (putt ? 0 : 0.4 * over);
-      knee = lerp(0.28, putt ? 0.22 : 0.34, t);
-      elbow = (putt ? 0.05 : 0.85) * cockT + 0.25 * over;
-      sideBend = lerp(putt ? -0.04 : -0.10, putt ? -0.02 : -0.16, t);
-      finishStand = 0;
-    } else if (s <= 2) {
-      const t = clamp((s - 1.25) / 0.75, 0, 1);
-      const e = smooth(t);
-      // Hips lead, shoulders follow, wrists stay cocked until late (lag).
-      const hipT = smooth(clamp(t / 0.72, 0, 1));
-      const shT = smooth(clamp((t - 0.08) / 0.92, 0, 1));
-      const release = smooth(clamp((t - 0.62) / 0.38, 0, 1));
-      const topSh = putt ? -0.42 : -1.62;
-      const topHip = topSh * (putt ? 0.06 : 0.40);
-      shoulderY = lerp(topSh, putt ? 0.05 : 0.25, shT);
-      hipY = lerp(topHip, putt ? 0.02 : 0.55, hipT);
-      spineX = lerp(putt ? 0.22 : 0.42, putt ? 0.26 : 0.55, e);
-      wrist = lerp(putt ? 0.18 : 1.05, putt ? 0.02 : 0.08, release);
-      knee = lerp(putt ? 0.22 : 0.34, 0.18, e);
-      elbow = lerp(putt ? 0.05 : 0.85, 0.12, release);
-      sideBend = lerp(-0.14, 0.02, e);
-      finishStand = 0;
-    } else {
-      const t = smooth(clamp((s - 2) / 1, 0, 1));
-      shoulderY = lerp(putt ? 0.05 : 0.25, putt ? 0.28 : 1.45, t);
-      hipY = lerp(putt ? 0.02 : 0.55, putt ? 0.08 : 0.85, t);
-      finishStand = t;
-      spineX = lerp(putt ? 0.26 : 0.55, putt ? 0.20 : 0.28, t);
-      wrist = lerp(putt ? 0.02 : 0.08, putt ? 0.0 : -0.35, t);
-      knee = lerp(0.18, putt ? 0.16 : 0.08, t);
-      elbow = lerp(0.12, putt ? 0.02 : 0.15, t);
-      sideBend = lerp(0.02, 0.08, t);
-    }
-
-    // Open (positive path) holds the face open and shortens the wrap.
-    // Closed (negative) finishes more around the body.
-    const wrap = clamp(path, -1, 1);
-    if (s > 1.4) {
-      const k = clamp((s - 1.4) / 1.2, 0, 1);
-      shoulderY += wrap * 0.38 * k;
-      wrist += wrap * 0.55 * k;
-      hipY += wrap * 0.12 * k;
-    }
-
-    B.hips.rotation.y = hipY;
-    B.hips.rotation.x = -knee * 0.15;
-    B.upLegL.rotation.x = -knee;
-    B.upLegR.rotation.x = -knee * 0.85;
-    B.legL.rotation.x = knee * 1.15;
-    B.legR.rotation.x = knee;
-    // Weight to the trail side on the way back, onto the lead side through impact.
-    const weight = s < 1.25 ? clamp(s, 0, 1) : clamp(1 - (s - 1.25) * 0.8, -0.4, 1);
-    B.hips.position.x = 0.02 * weight;
-    B.spine.rotation.x = spineX;
-    B.spine.rotation.y = shoulderY * 0.25;
-    B.spine.rotation.z = sideBend;
-    B.chest.rotation.y = shoulderY * 0.75;
-    B.chest.rotation.z = sideBend * 0.4;
-    B.chest.rotation.x = -finishStand * (putt ? 0.02 : 0.12);
-    // Arms are placed by IK onto the grip. A little wrist set keeps the glove on the handle.
-    B.handL.rotation.z = 0.1 + wrap * 0.2 * clamp((s - 1.5) / 1.2, 0, 1);
-    B.handR.rotation.z = -0.15;
-    void wrist; void elbow;
-
-    // Quiet lower body on a putt: undo hip turn and knee sway.
-    if (putt) {
-      B.hips.rotation.y *= 0.25;
-      B.hips.position.x *= 0.2;
-      B.upLegL.rotation.x = -0.16;
-      B.upLegR.rotation.x = -0.16;
-      B.legL.rotation.x = 0.2;
-      B.legR.rotation.x = 0.2;
-    }
-
-    // Idle breathing and a small waggle only at address.
-    if (s < 0.04 && !pose.walking) {
-      const breathe = Math.sin(time * 1.5) * 0.012;
-      B.chest.rotation.x += breathe;
-      B.spine.rotation.x += breathe * 0.6;
-      const wag = Math.sin(time * 2.1) * 0.035;
-      B.handL.rotation.z += wag;
-      B.handR.rotation.z += wag * 0.8;
-      B.chest.rotation.y += wag * 0.15;
-    }
-
-    // Shaft is aimed after the skeleton is posed. See aimClub().
-    club.userData.swing = { s, power, path, putt };
-  }
-
-  const _grip = new THREE.Vector3();
-  const _headT = new THREE.Vector3();
-  const _ikS = new THREE.Vector3();
-  const _ikAxis = new THREE.Vector3();
-  const _ikPole = new THREE.Vector3();
-  const _ikN = new THREE.Vector3();
-  const _ikBend = new THREE.Vector3();
-  const _ikElbow = new THREE.Vector3();
-  const _ikDir = new THREE.Vector3();
-  const _localDown = new THREE.Vector3(0, -1, 0);
-
-  function swingPoints(info, ball, aimYaw) {
-    const s = info.s, power = info.power, path = info.path, putt = info.putt;
-    const dx = Math.sin(aimYaw), dz = -Math.cos(aimYaw);
-    const rx = -dz, rz = dx;
-    const by = ball.y;
-    const scale = putt ? 0.22 : 1;
-    // back (along -aim), side (trail +), up. Clubhead keys, then grip keys.
-    const keys = putt
-      ? [
-        { g: [0.02, 0.28, 0.62], h: [0.04, 0.06, 0.02] },
-        { g: [-0.16, 0.30, 0.66], h: [-0.28, 0.10, 0.04] },
-        { g: [0.06, 0.22, 0.60], h: [0.10, 0.04, 0.0] },
-      ]
-      : [
-        { g: [0.04, 0.20, 0.68], h: [-0.02, 0.04, 0.02] },
-        { g: [0.18, 0.22, 1.55], h: [-0.85, 0.22, 1.55] },
-        { g: [0.28, 0.16, 1.48], h: [-1.05, 0.16, 1.12] },
-        { g: [-0.06, 0.12, 0.66], h: [-0.02, 0.03, 0.02] },
-        { g: [-0.12, -0.06, 1.64], h: [-0.18, -0.28 - path * 0.4, 2.08] },
-      ];
-    const at = (k, which) => {
-      const v = which === 'g' ? k.g : k.h;
-      const back = v[0] * (which === 'h' ? 1 : scale);
-      const side = v[1];
-      const up = which === 'g' ? v[2] : v[2];
-      return {
-        x: ball.x - dx * back + rx * side,
-        y: by + (which === 'h' && putt ? 0.04 : up * (putt && which === 'g' ? 1 : 1)),
-        z: ball.z - dz * back + rz * side,
-      };
-    };
-    // Map s onto the key index.
-    let i0 = 0, i1 = 1, u = 0;
-    if (putt) {
-      if (s <= 1) { i0 = 0; i1 = 1; u = smooth(s); }
-      else { i0 = 1; i1 = 2; u = smooth(clamp((s - 1) / 1.2, 0, 1)); }
-    } else if (s <= 1) { i0 = 0; i1 = 1; u = smooth(s); }
-    else if (s <= 1.28) { i0 = 1; i1 = power > 1.02 ? 2 : 1; u = (s - 1) / 0.28; }
-    else if (s <= 2) { i0 = power > 1.02 ? 2 : 1; i1 = 3; u = smooth((s - 1.28) / 0.72); u = u * u; }
-    else { i0 = 3; i1 = 4; u = smooth(clamp((s - 2) / 1, 0, 1)); }
-    const A = at(keys[i0], 'g'), B = at(keys[i1], 'g');
-    const C = at(keys[i0], 'h'), D = at(keys[i1], 'h');
-    _grip.set(lerp(A.x, B.x, u), lerp(A.y, B.y, u), lerp(A.z, B.z, u));
-    _headT.set(lerp(C.x, D.x, u), lerp(C.y, D.y, u), lerp(C.z, D.z, u));
-    if (!putt && s > 2) {
-      _headT.x += rx * path * 0.3 * u;
-      _headT.z += rz * path * 0.3 * u;
+  function sample(clip, f) {
+    const frames = clip.bvh.frames;
+    const i0 = Math.max(0, Math.min(frames.length - 1, Math.floor(f)));
+    const i1 = Math.min(frames.length - 1, i0 + 1);
+    const u = f - i0;
+    rootPosition(clip.bvh.root, frames[i0], v1);
+    rootPosition(clip.bvh.root, frames[i1], v2);
+    v1.lerp(v2, u).multiplyScalar(clip.scale);
+    clip.root.set(clip.pin.x, v1.y - clip.ground, clip.pin.z);
+    for (const joint of clip.bvh.joints) {
+      jointQuaternion(joint, frames[i0], qA, qT, AX);
+      jointQuaternion(joint, frames[i1], qB, qT, AX);
+      clip.quats[joint.name].copy(qA).slerp(qB, u);
     }
   }
 
-  function alignBone(bone, worldDir) {
-    bone.parent.updateMatrixWorld(true);
-    bone.parent.getWorldQuaternion(_handQ);
-    _desired.setFromUnitVectors(_localDown, worldDir);
-    bone.quaternion.copy(_handQ).invert().multiply(_desired);
+  function apply(clip) {
+    clip.bones.Hips.position.copy(clip.root);
+    for (const joint of clip.bvh.joints) clip.bones[joint.name].quaternion.copy(clip.quats[joint.name]);
+    rig.updateMatrixWorld(true);
   }
 
-  function ikArm(arm, fore, target, pole, aLen, bLen) {
-    arm.parent.updateMatrixWorld(true);
-    _ikS.setFromMatrixPosition(arm.matrixWorld);
-    _ikAxis.subVectors(target, _ikS);
-    let dist = _ikAxis.length();
-    if (dist < 1e-4) return;
-    const maxD = aLen + bLen - 0.015;
-    const minD = Math.abs(aLen - bLen) + 0.015;
-    dist = clamp(dist, minD, maxD);
-    _ikAxis.subVectors(target, _ikS).normalize();
-    const cosS = clamp((aLen * aLen + dist * dist - bLen * bLen) / (2 * aLen * dist), -1, 1);
-    const shoulderAng = Math.acos(cosS);
-    _ikPole.subVectors(pole, _ikS);
-    _ikN.crossVectors(_ikAxis, _ikPole);
-    if (_ikN.lengthSq() < 1e-8) _ikN.set(0, 1, 0);
-    _ikN.normalize();
-    _ikBend.crossVectors(_ikN, _ikAxis).normalize();
-    _ikElbow.copy(_ikS).addScaledVector(_ikAxis, Math.cos(shoulderAng) * aLen).addScaledVector(_ikBend, Math.sin(shoulderAng) * aLen);
-    _ikDir.subVectors(_ikElbow, _ikS).normalize();
-    alignBone(arm, _ikDir);
-    arm.updateMatrixWorld(true);
-    _ikDir.subVectors(target, _ikElbow).normalize();
-    alignBone(fore, _ikDir);
-    fore.updateMatrixWorld(true);
+  function frameFor(phases, s) {
+    const { address, top, impact, finish } = phases;
+    if (s <= 1) return address + (top - address) * Math.max(0, s);
+    if (s <= 2) return top + (impact - top) * (s - 1);
+    return impact + (finish - impact) * Math.min(1, s - 2);
   }
 
-  function poseArms(ball, aimYaw) {
-    mesh.updateMatrixWorld(true);
-    const info = club.userData.swing || { s: 0, power: 0, path: 0, putt: false };
-    swingPoints(info, ball, aimYaw);
-    const dx = Math.sin(aimYaw), dz = -Math.cos(aimYaw);
-    const rx = -dz, rz = dx;
-    // At the top: hands over the trail shoulder, lead arm straight, shaft level and aimed at the target.
-    if (!info.putt && info.s > 0.72 && info.s < 1.35) {
-      const fadeIn = smooth(clamp((info.s - 0.72) / 0.22, 0, 1));
-      const fadeOut = info.s <= 1.02 ? 1 : 1 - clamp((info.s - 1.02) / 0.3, 0, 1);
-      const fade = fadeIn * fadeOut;
-      bones.shoulderR.updateMatrixWorld(true);
-      bones.shoulderL.updateMatrixWorld(true);
-      const trail = _ikS.setFromMatrixPosition(bones.shoulderR.matrixWorld);
-      const lead = _ikAxis.setFromMatrixPosition(bones.shoulderL.matrixWorld);
-      const over = info.power > 1.02 ? clamp((info.s - 1) / 0.28, 0, 1) : 0;
-      const want = _ikElbow.set(trail.x - dx * 0.05 + rx * 0.02, Math.max(trail.y + 0.30, ball.y + 1.48) - over * 0.08, trail.z - dz * 0.05 + rz * 0.02);
-      const reach = _ikDir.subVectors(want, lead);
-      const dist = reach.length();
-      if (dist < 0.5 && dist > 1e-4) want.addScaledVector(reach.multiplyScalar(1 / dist), 0.5 - dist);
-      const head = _ikPole.set(want.x + dx * (0.92 + over * 0.18), want.y - over * 0.42, want.z + dz * (0.92 + over * 0.18));
-      _grip.lerp(want, fade);
-      _headT.lerp(head, fade);
-    }
-    // Elbows fold down. Trail elbow a little behind, lead elbow a little toward the target.
-    const poleR = _a.set(_grip.x - dx * 0.25 + rx * 0.15, _grip.y - 0.55, _grip.z - dz * 0.25 + rz * 0.15);
-    const poleL = _b.set(_grip.x + dx * 0.1 - rx * 0.2, _grip.y - 0.45, _grip.z + dz * 0.1 - rz * 0.2);
-    const gripR = _c.set(_grip.x + rx * 0.03, _grip.y, _grip.z + rz * 0.03);
-    ikArm(bones.armL, bones.foreL, _grip, poleL, 0.28, 0.25);
-    ikArm(bones.armR, bones.foreR, gripR, poleR, 0.28, 0.25);
-    bones.handL.updateMatrixWorld(true);
+  function wp(name, out) {
+    return swing.bones[name].getWorldPosition(out);
   }
 
-  function aimClub(ball, aimYaw) {
-    const info = club.userData.swing || { s: 0, power: 0, path: 0, putt: false };
-    poseArms(ball, aimYaw);
-    const putt = info.putt;
-    const path = info.path;
-    const s = info.s;
-    const dest = _headT;
-    bones.handL.getWorldPosition(_hand);
-    const reach = Math.max(0.35, _hand.distanceTo(dest));
-    const len = clamp(reach - 0.04, putt ? 0.55 : 0.62, putt ? 0.92 : 1.18);
-    const parts = club.userData.parts;
-    parts.shaft.scale.y = len / 0.92;
-    parts.shaft.position.y = -len * 0.5;
-    parts.hosel.position.y = -len + 0.03;
-    parts.iron.position.y = -len + 0.015;
-    parts.wedge.position.y = -len + 0.015;
-    parts.putter.position.y = -len + 0.02;
-    _dir.copy(dest).sub(_hand);
-    if (_dir.lengthSq() < 1e-6) return;
-    _dir.normalize();
-    _desired.setFromUnitVectors(_down, _dir);
-    bones.handL.getWorldQuaternion(_handQ);
-    club.quaternion.copy(_handQ).invert().multiply(_desired);
-    const face = path * clamp((s - 1.15) / 1.4, 0, 1);
-    _roll.setFromAxisAngle(_down, face * 0.9);
-    club.quaternion.multiply(_roll);
+  function solveArm(shoulder, target, pole, aLen, bLen, out) {
+    s1.subVectors(target, shoulder);
+    let dist = s1.length();
+    if (dist < 1e-5) return out.copy(shoulder);
+    const max = aLen + bLen - 0.002;
+    const min = Math.abs(aLen - bLen) + 0.002;
+    const clamped = Math.max(min, Math.min(max, dist));
+    s1.multiplyScalar(1 / dist);
+    const cos = Math.max(-1, Math.min(1, (aLen * aLen + clamped * clamped - bLen * bLen) / (2 * aLen * clamped)));
+    const along = cos;
+    const away = Math.sqrt(Math.max(0, 1 - cos * cos));
+    s2.subVectors(pole, shoulder);
+    s3.crossVectors(s1, s2);
+    if (s3.lengthSq() < 1e-8) s3.set(0, 1, 0);
+    s3.normalize();
+    s2.crossVectors(s3, s1).normalize();
+    return out.copy(shoulder).addScaledVector(s1, along * aLen).addScaledVector(s2, away * aLen);
   }
 
-  function applyWalk(dt) {
-    pose.walkPhase += dt * 7.5;
-    const w = pose.walkPhase;
-    const B = bones;
-    for (const bone of bones.list) bone.rotation.set(0, 0, 0);
-    B.upLegL.rotation.x = Math.sin(w) * 0.65;
-    B.upLegR.rotation.x = Math.sin(w + Math.PI) * 0.65;
-    B.legL.rotation.x = Math.max(0, Math.sin(w + 0.5)) * 0.7;
-    B.legR.rotation.x = Math.max(0, Math.sin(w + Math.PI + 0.5)) * 0.7;
-    B.armL.rotation.x = Math.sin(w + Math.PI) * 0.45;
-    B.armR.rotation.x = Math.sin(w) * 0.45;
-    B.spine.rotation.y = Math.sin(w) * 0.06;
-    B.chest.rotation.x = 0.08;
-    B.hips.position.x = 0;
-    club.rotation.set(0.9, 0, 0.2);
+  function alignAxis(bone, worldPoint, axisSign) {
+    bone.updateWorldMatrix(true, false);
+    bone.getWorldPosition(v1);
+    v2.subVectors(worldPoint, v1);
+    if (v2.lengthSq() < 1e-8) return;
+    v2.normalize();
+    v3.set(axisSign, 0, 0);
+    qA.setFromUnitVectors(v3, v2);
+    bone.parent.updateWorldMatrix(true, false);
+    bone.parent.getWorldQuaternion(qB);
+    bone.quaternion.copy(qB.invert()).multiply(qA);
   }
 
-  function stanceOf(ball, aimYaw, putt) {
-    const dx = Math.sin(aimYaw), dz = -Math.cos(aimYaw);
-    const rx = -dz, rz = dx;
-    const side = putt ? 0.36 : 0.52;
-    const back = putt ? 0.02 : 0.04;
-    const chestX = dz, chestZ = -dx; // face the ball (opposite the trail-side offset)
-    return {
-      x: ball.x + rx * side - dx * back,
-      z: ball.z + rz * side - dz * back,
-      yaw: Math.atan2(chestX, chestZ),
-    };
-  }
-
-  function update(dt, inp) {
-    const ball = inp.ball;
-    const aimYaw = inp.aimYaw || 0;
-    const putt = !!inp.putt;
-    const phase = inp.phase;
-    const st = stanceOf(ball, aimYaw, putt);
-    const overhead = phase === 'overhead' || phase === 'intro';
-    const gx = mesh.position.x, gz = mesh.position.z;
-    let dist = Math.hypot(st.x - gx, st.z - gz);
-    if (!Number.isFinite(gx)) dist = 99;
-
-    let hide = overhead;
-    if (!mesh.userData.placed) {
-      mesh.position.set(st.x, 0, st.z);
-      mesh.userData.placed = true;
-      dist = 0;
-      pose.opacity = phase === 'intro' ? 0 : 1;
-    }
-
-    if (dist > 22 || (hide && dist > 0.4)) {
-      pose.opacity = Math.max(0, pose.opacity - dt * 4);
-      if (pose.opacity <= 0.02) {
-        mesh.position.set(st.x, inp.heightAt(st.x, st.z), st.z);
-        pose.walking = false;
+  function poseAt(clip, s, ballWorld) {
+    sample(clip, frameFor(clip.phases, s));
+    apply(clip);
+    const off = clip.gripOff || { x: GRIP, y: 0, z: 0 };
+    const lead = wp('LeftHand', v1).clone();
+    swing.bones.LeftHand.getWorldQuaternion(qA);
+    v2.set(off.x, off.y, off.z).applyQuaternion(qA);
+    const grip = lead.add(v2).clone();
+    const frozen = v3.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
+    // Shaft from both hands: trail hand sits closer to the clubhead, so
+    // lead → trail is the handle. Wrist hinge (forearm × handle) keeps the
+    // shaft in that plane instead of a single frozen wrist axis.
+    const trail = swing.bones.RightHand.getWorldPosition(new THREE.Vector3());
+    const leadElbow = swing.bones.LeftForeArm.getWorldPosition(new THREE.Vector3());
+    const handle = trail.clone().sub(grip);
+    const forearm = grip.clone().sub(leadElbow);
+    let shaftDir = frozen.clone();
+    if (handle.length() > 0.04 && forearm.length() > 0.04) {
+      handle.normalize();
+      forearm.normalize();
+      if (handle.dot(frozen) < 0) handle.negate();
+      const hinge = new THREE.Vector3().crossVectors(forearm, handle);
+      if (hinge.lengthSq() > 1e-6) {
+        hinge.normalize();
+        const plane = new THREE.Vector3().crossVectors(hinge, forearm).normalize();
+        if (plane.dot(frozen) < 0) plane.negate();
+        // Hands dominate once the backswing is moving; address stays on the
+        // calibrated shaft so the head starts on the ball.
+        const handK = s <= 0 ? 0 : s < 0.45 ? s / 0.45 : (s < 1.65 ? 1 : Math.max(0, 1 - (s - 1.65) / 0.25));
+        shaftDir.copy(frozen).lerp(plane, handK).normalize();
       }
-    } else if (dist > 0.12 && !hide) {
-      pose.walking = true;
-      pose.opacity = Math.min(1, pose.opacity + dt * 3);
-      const step = Math.min(dist, dt * Math.max(1.6, dist * 1.8));
-      const vx = (st.x - mesh.position.x) / dist;
-      const vz = (st.z - mesh.position.z) / dist;
-      mesh.position.x += vx * step;
-      mesh.position.z += vz * step;
-      mesh.position.y = inp.heightAt(mesh.position.x, mesh.position.z);
-    } else {
-      pose.walking = false;
-      if (!hide) pose.opacity = Math.min(1, pose.opacity + dt * 3);
-      mesh.position.x = st.x;
-      mesh.position.z = st.z;
-      mesh.position.y = inp.heightAt(st.x, st.z);
     }
-    if (hide) pose.opacity = Math.max(0, pose.opacity - dt * 3.2);
-
-    mesh.rotation.y = st.yaw;
-    mesh.visible = pose.opacity > 0.03;
-    mat.opacity = pose.opacity;
-    mat.depthWrite = pose.opacity > 0.85;
-
-    setClub(inp.clubId || '8i');
-    if (pose.walking && pose.opacity > 0.2 && !hide) applyWalk(dt);
-    else applySwing(inp.s || 0, inp.power || 0, inp.path || 0, putt, inp.time || 0);
-    if (!(pose.walking && pose.opacity > 0.2 && !hide)) aimClub(ball, aimYaw);
-
-    pose.s = inp.s || 0;
-    pose.putt = putt;
+    // Full-iron top: pull the hand-derived shaft toward parallel with the ground
+    // (a few degrees downhill). Only around the top, so address and impact stay put.
+    if (s > 0.72 && s < 1.28) {
+      const k = 1 - Math.abs(s - 1) / 0.28;
+      const h = Math.hypot(shaftDir.x, shaftDir.z) || 1e-4;
+      const flat = new THREE.Vector3(shaftDir.x / h * 0.99, -0.14, shaftDir.z / h * 0.99);
+      shaftDir.lerp(flat, Math.max(0, k) * 0.85).normalize();
+    }
+    let len = clip.clubLength;
+    // Small correction only near impact, so the head meets the ball.
+    if (ballWorld && s > 1.65 && s < 2.35) {
+      const k = s <= 2 ? (s - 1.65) / 0.35 : Math.max(0, 1 - (s - 2) / 0.35);
+      const to = new THREE.Vector3(ballWorld.x, ballWorld.y, ballWorld.z).sub(grip);
+      const dist = to.length();
+      if (dist > 0.05 && k > 0) {
+        to.multiplyScalar(1 / dist);
+        shaftDir.lerp(to, k).normalize();
+        len = clip.clubLength + (dist - clip.clubLength) * k;
+      }
+    }
+    const head = grip.clone().addScaledVector(shaftDir, len);
+    const target = grip.clone().addScaledVector(shaftDir, 0.07);
+    const shoulder = wp('RightArm', v1).clone();
+    const pole = wp('RightForeArm', v2).clone();
+    const aLen = Math.abs(swing.bones.RightForeArm.position.x);
+    const bLen = Math.abs(swing.bones.RightHand.position.x);
+    const elbow = solveArm(shoulder, target, pole, aLen, bLen, new THREE.Vector3());
+    alignAxis(swing.bones.RightArm, elbow, swing.bones.RightArm.userData.axis || -1);
+    rig.updateMatrixWorld(true);
+    alignAxis(swing.bones.RightForeArm, target, swing.bones.RightForeArm.userData.axis || -1);
+    rig.updateMatrixWorld(true);
+    return { grip, head };
   }
 
-  return { mesh, club, bones, update, pose };
+  function layout(hit, clubId) {
+    anchor.updateMatrixWorld(true);
+    const inv = anchor.matrixWorld.clone().invert();
+    const toLocal = (src, out) => out.copy(src).applyMatrix4(inv);
+    for (const seg of segments) {
+      seg.a.getWorldPosition(v1);
+      seg.b.getWorldPosition(v2);
+      toLocal(v1, v1);
+      toLocal(v2, v2);
+      const len = v1.distanceTo(v2);
+      seg.mesh.visible = len > 0.02;
+      if (!seg.mesh.visible) continue;
+      seg.mesh.position.copy(v1).lerp(v2, 0.5);
+      v4.subVectors(v2, v1).multiplyScalar(1 / len);
+      seg.mesh.quaternion.setFromUnitVectors(UP, v4);
+      seg.mesh.scale.set(1, len, 1);
+    }
+    for (const sp of spheres) {
+      sp.bone.getWorldPosition(v1);
+      toLocal(v1, sp.mesh.position);
+    }
+    toLocal(hit.grip, v1);
+    toLocal(hit.head, v2);
+    const len = Math.max(0.25, v1.distanceTo(v2));
+    v4.subVectors(v2, v1).multiplyScalar(1 / len);
+    shaft.position.copy(v1);
+    shaft.quaternion.setFromUnitVectors(DOWN, v4);
+    shaft.scale.set(1, len, 1);
+    const putter = clubId === 'PT';
+    blade.visible = !putter;
+    putterHead.visible = putter;
+    const hm = putter ? putterHead : blade;
+    hm.position.copy(v2);
+    hm.quaternion.copy(shaft.quaternion);
+  }
+
+  function place(ball, aimYaw, heightAt) {
+    // Down-the-line: the mocap chest already faces across the target line,
+    // so a camera on that line sees a right-hander from behind his trail side.
+    const yaw = -aimYaw;
+    const key = yaw.toFixed(4) + '|' + ball.x.toFixed(2) + '|' + ball.z.toFixed(2) + '|' + active.name;
+    anchor.rotation.y = yaw;
+    anchor.scale.set(1, 1, 1);
+    if (active.placeKey === key) {
+      anchor.position.copy(active.placePos);
+      return;
+    }
+    anchor.position.set(ball.x, heightAt(ball.x, ball.z), ball.z);
+    anchor.updateMatrixWorld(true);
+    const hit = poseAt(active, 0, null);
+    anchor.position.x += ball.x - hit.head.x;
+    anchor.position.z += ball.z - hit.head.z;
+    anchor.position.y = heightAt(anchor.position.x, anchor.position.z);
+    active.placeKey = key;
+    active.placePos = anchor.position.clone();
+  }
+
+  function update(_dt, inp) {
+    if (!pose.ready) return;
+    const clip = inp.putt ? putt : swing;
+    active = clip;
+    const hide = inp.phase === 'intro' || inp.phase === 'overhead';
+    anchor.visible = !hide;
+    if (hide) return;
+    pose.s = inp.s || 0;
+    pose.putt = !!inp.putt;
+    pose.walking = false;
+    pose.take = clip.name;
+    place(inp.ball, inp.aimYaw || 0, inp.heightAt);
+    const hit = poseAt(clip, pose.s, inp.ball);
+    layout(hit, inp.clubId || '7i');
+    const face = (inp.path || 0) * 0.35;
+    if (face) {
+      v1.set(0, 1, 0).applyQuaternion(shaft.quaternion);
+      qT.setFromAxisAngle(v1, face);
+      shaft.quaternion.premultiply(qT);
+      blade.quaternion.premultiply(qT);
+      putterHead.quaternion.premultiply(qT);
+    }
+  }
+
+  function buildBones(bvh) {
+    const bones = {};
+    const quats = {};
+    function add(node, parent) {
+      if (node.end) return;
+      const bone = new THREE.Bone();
+      bone.name = node.name;
+      bone.position.set(node.offset[0], node.offset[1], node.offset[2]);
+      parent.add(bone);
+      bones[node.name] = bone;
+      quats[node.name] = new THREE.Quaternion();
+      const child = node.children[0];
+      if (child) bone.userData.axis = child.offset[0] < -1e-4 ? -1 : 1;
+      if (node.endOffset) bone.userData.end = node.endOffset;
+      for (const c of node.children) add(c, bone);
+    }
+    const holder = new THREE.Group();
+    add(bvh.root, holder);
+    return { bones, quats, holder };
+  }
+
+  function prepare(bvh, phases, name, bones, quats, scale) {
+    const clip = {
+      name, bvh, phases, bones, quats, scale,
+      root: new THREE.Vector3(), pin: new THREE.Vector3(), ground: 0,
+      shaftLocal: new THREE.Vector3(), clubLength: 0.9, addressHead: new THREE.Vector3(),
+    };
+    const addr = bvh.frames[phases.address];
+    rootPosition(bvh.root, addr, clip.pin).multiplyScalar(scale);
+    sample(clip, phases.address);
+    apply(clip);
+    const footY = Math.min(bones.LeftToeBase.getWorldPosition(v1).y, bones.RightToeBase.getWorldPosition(v2).y);
+    clip.ground = footY;
+    sample(clip, phases.address);
+    apply(clip);
+    return clip;
+  }
+
+  function handGrip(bones, offset, quatOut, posOut) {
+    bones.LeftHand.getWorldQuaternion(quatOut);
+    bones.LeftHand.getWorldPosition(posOut);
+    posOut.add(s1.set(offset.x, offset.y, offset.z).applyQuaternion(quatOut));
+    return posOut;
+  }
+
+  function calibrate(clip) {
+    const bones = clip.bones;
+    // First guess: a point on the ground in front of the stance. The grip offset is then
+    // chosen so a rigid shaft in the lead hand meets that point at address and, as nearly
+    // as the captured wrists allow, again at impact.
+    sample(clip, clip.phases.address);
+    apply(clip);
+    const grip0 = handGrip(bones, { x: GRIP, y: 0, z: 0 }, qA, v1).clone();
+    const hips = bones.Hips.getWorldPosition(v2);
+    const chest = s2.set(grip0.x - hips.x, 0, grip0.z - hips.z);
+    if (chest.lengthSq() < 1e-6) chest.set(1, 0, 0);
+    chest.normalize();
+    const lSh = bones.LeftArm.getWorldPosition(v3).clone();
+    const rSh = bones.RightArm.getWorldPosition(v4).clone();
+    const downLine = s3.set(lSh.x - rSh.x, 0, lSh.z - rSh.z).normalize();
+    const dir0 = chest.multiplyScalar(0.38).add(downLine.multiplyScalar(0.1));
+    dir0.y = -1;
+    dir0.normalize();
+    const reach = Math.max(0.05, grip0.y - 0.021);
+    const ball = grip0.clone().addScaledVector(dir0, reach / Math.max(0.25, -dir0.y));
+    let best = null;
+    for (let x = -0.02; x <= 0.16; x += 0.03) {
+      for (let y = -0.1; y <= 0.1; y += 0.04) {
+        for (let z = -0.1; z <= 0.1; z += 0.04) {
+          const off = { x, y, z };
+          sample(clip, clip.phases.address);
+          apply(clip);
+          const gA = handGrip(bones, off, qA, v1).clone();
+          const to = s2.subVectors(ball, gA);
+          const len = to.length();
+          if (len < 0.55 || len > 1.25) continue;
+          const local = to.multiplyScalar(1 / len).applyQuaternion(qA.clone().invert());
+          sample(clip, clip.phases.impact);
+          apply(clip);
+          const gI = handGrip(bones, off, qB, v2).clone();
+          const head = gI.add(s3.copy(local).applyQuaternion(qB).multiplyScalar(len));
+          const miss = head.distanceTo(ball);
+          if (!best || miss < best.miss) best = { miss, off, len, local: local.clone() };
+        }
+      }
+    }
+    clip.gripOff = best ? best.off : { x: GRIP, y: 0, z: 0 };
+    clip.clubLength = best ? best.len : reach;
+    clip.shaftLocal.copy(best ? best.local : dir0);
+    if (!best) {
+      bones.LeftHand.getWorldQuaternion(qA);
+      clip.shaftLocal.copy(dir0).applyQuaternion(qA.clone().invert());
+    }
+    sample(clip, clip.phases.address);
+    apply(clip);
+    const g = handGrip(bones, clip.gripOff, qA, v1);
+    const sd = s2.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
+    clip.addressHead.copy(g).addScaledVector(sd, clip.clubLength);
+    clip.impactMissM = best ? best.miss : null;
+  }
+
+  function measure(clip) {
+    const P = clip.phases;
+    poseAt(clip, 1);
+    const lArm = wp('LeftArm', v1).clone();
+    const rArm = wp('RightArm', v2).clone();
+    const lHip = wp('LeftUpLeg', v3).clone();
+    const rHip = wp('RightUpLeg', v4).clone();
+    let xf = Math.abs(Math.atan2(lArm.x - rArm.x, lArm.z - rArm.z) - Math.atan2(lHip.x - rHip.x, lHip.z - rHip.z)) * 180 / Math.PI;
+    if (xf > 180) xf = 360 - xf;
+    const elbow = wp('LeftForeArm', v1).clone();
+    const hand = wp('LeftHand', v2).clone();
+    const straight = lArm.distanceTo(hand) / Math.max(1e-4, lArm.distanceTo(elbow) + elbow.distanceTo(hand));
+    swing.bones.LeftHand.getWorldQuaternion(qA);
+    const shaftDir = v3.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
+    const elev = Math.atan2(shaftDir.y, Math.hypot(shaftDir.x, shaftDir.z)) * 180 / Math.PI;
+    const names = ['Hips', 'Spine1', 'LeftArm'];
+    const prev = {};
+    sample(clip, P.top - 8);
+    apply(clip);
+    for (const n of names) prev[n] = clip.quats[n].clone();
+    let prevClub = shaftDir.clone();
+    const peak = { Hips: [-1, 0], Spine1: [-1, 0], LeftArm: [-1, 0], club: [-1, 0] };
+    for (let f = P.top - 7; f <= P.impact + 10; f++) {
+      sample(clip, f);
+      apply(clip);
+      for (const n of names) {
+        const w = quatAngle(prev[n], clip.quats[n]) / clip.bvh.frameTime;
+        if (w > peak[n][0]) peak[n] = [w, f];
+        prev[n].copy(clip.quats[n]);
+      }
+      swing.bones.LeftHand.getWorldQuaternion(qA);
+      const cd = v4.copy(clip.shaftLocal).applyQuaternion(qA).normalize();
+      const dang = Math.acos(Math.max(-1, Math.min(1, prevClub.dot(cd)))) / clip.bvh.frameTime;
+      if (dang > peak.club[0]) peak.club = [dang, f];
+      prevClub.copy(cd);
+    }
+    return {
+      take: clip.name,
+      xFactorDeg: +xf.toFixed(1),
+      leadArmStraight: +straight.toFixed(3),
+      shaftElevationAtTopDeg: +elev.toFixed(1),
+      clubLengthM: +clip.clubLength.toFixed(3),
+      impactMissM: clip.impactMissM == null ? null : +clip.impactMissM.toFixed(3),
+      capturedBackswingS: +((P.top - P.address) * clip.bvh.frameTime).toFixed(3),
+      capturedDownswingS: +((P.impact - P.top) * clip.bvh.frameTime).toFixed(3),
+      sequence: Object.entries(peak).sort((a, b) => a[1][1] - b[1][1]).map(([joint, v]) => ({ joint, frame: v[1] })),
+    };
+  }
+
+  const ready = Promise.all([loadText('64_06.bvh'), loadText('64_13.bvh')]).then(([a, b]) => {
+    const bvhS = parseBVH(a);
+    const bvhP = parseBVH(b);
+    const built = buildBones(bvhS);
+    rig.add(built.holder);
+    // Scale the raw skeleton so the address crown is 1.80 m.
+    sampleStub(built, bvhS, PHASE.swing.address, 1);
+    built.holder.updateMatrixWorld(true);
+    const head = built.bones.Head.getWorldPosition(v1).clone();
+    const end = built.bones.Head.userData.end;
+    if (end) {
+      built.bones.Head.getWorldQuaternion(qA);
+      head.add(v2.set(end[0], end[1], end[2]).applyQuaternion(qA));
+    }
+    const toe = Math.min(
+      built.bones.LeftToeBase.getWorldPosition(v2).y,
+      built.bones.RightToeBase.getWorldPosition(v3).y,
+    );
+    const scale = STATURE / Math.max(0.5, head.y - toe);
+    built.holder.traverse((o) => { if (o.isBone) o.position.multiplyScalar(scale); });
+
+    swing = prepare(bvhS, PHASE.swing, '64_06', built.bones, built.quats, scale);
+    // Putt frames drive the same bones and quaternion slots are separate.
+    const puttQuats = {};
+    for (const j of bvhP.joints) puttQuats[j.name] = new THREE.Quaternion();
+    putt = prepare(bvhP, PHASE.putt, '64_13', built.bones, puttQuats, scale);
+
+    const radius = {
+      Hips: 0.078, Spine: 0.07, Spine1: 0.082, Neck1: 0.046,
+      LeftUpLeg: 0.058, RightUpLeg: 0.058, LeftLeg: 0.044, RightLeg: 0.044,
+      LeftFoot: 0.032, RightFoot: 0.032, LeftArm: 0.042, RightArm: 0.042,
+      LeftForeArm: 0.034, RightForeArm: 0.034,
+    };
+    for (const joint of bvhS.joints) {
+      const bone = built.bones[joint.name];
+      const child = joint.children[0];
+      if (!child) continue;
+      const seg = built.bones[child.name].position.length();
+      if (seg < 0.03) continue;
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius[joint.name] || 0.03, (radius[joint.name] || 0.03) * 0.92, 1, 10), boneMat);
+      mesh.frustumCulled = false;
+      mesh.castShadow = true;
+      rig.add(mesh);
+      segments.push({ mesh, a: bone, b: built.bones[child.name] });
+      const sph = new THREE.Mesh(new THREE.SphereGeometry((radius[joint.name] || 0.03) * 1.2, 12, 10), jointMat);
+      sph.frustumCulled = false;
+      sph.castShadow = true;
+      rig.add(sph);
+      spheres.push({ mesh: sph, bone });
+    }
+    const headR = Math.max(0.095, (built.bones.Head.userData.end ? Math.hypot(...built.bones.Head.userData.end) * scale : 0.12) * 0.5);
+    const headMesh = new THREE.Mesh(new THREE.SphereGeometry(headR, 18, 14), boneMat);
+    headMesh.castShadow = true;
+    rig.add(headMesh);
+    spheres.push({ mesh: headMesh, bone: built.bones.Head });
+
+    calibrate(swing);
+    calibrate(putt);
+    pose.metrics = { swing: measure(swing), putt: measure(putt) };
+    pose.ready = true;
+    anchor.visible = true;
+  }).catch((err) => console.error(err));
+
+  // Used only while the bones are still in file units, before prepare().
+  function sampleStub(built, bvh, frame, scale) {
+    const frames = bvh.frames[frame];
+    rootPosition(bvh.root, frames, built.bones.Hips.position).multiplyScalar(scale);
+    for (const joint of bvh.joints) {
+      jointQuaternion(joint, frames, built.quats[joint.name], qT, AX);
+      built.bones[joint.name].quaternion.copy(built.quats[joint.name]);
+    }
+  }
+
+  return { mesh: anchor, update, pose, ready, club: shaft };
 }

@@ -29,6 +29,8 @@ Aim arrows and the club arrows still nudge the shot after you confirm. Difficult
 
 ## Golfer
 
-The golfer is an original procedural character: navy polo, white collar, cap, dark trousers, belt, white shoes, and a glove. He is not a real person. The stick drives a full swing. Dragging back takes the club back, and at the top the shaft is level and aimed at the target, with the hands over the trail shoulder and the lead arm straight. Pushing up plays the downswing and the finish at that speed. The ball leaves at impact.
+The figure is a capsule mannequin driven by motion capture, not a clothed character. The full swing is Carnegie Mellon subject 64, take 64_06. The putt is take 64_13. Dragging the stick scrubs the backswing. The push plays the downswing at that speed, impact is the launch, and the finish plays out. He does not walk between shots. The camera cuts to him already at address.
+
+The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217. BVH conversion by Bruce Hahne. See `assets/mocap/CREDIT.txt`.
 
 Strike, landing, breeze, birds, waves, and applause are synthesised in the browser. Mute is in Settings. The ↩ button retries the last shot.

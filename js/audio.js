@@ -127,6 +127,13 @@ export function createAudio() {
     const ng = envGain(t, 0.002, 0.01, 0.08, pure ? 0.35 : 0.2);
     src.connect(f); f.connect(ng); ng.connect(master);
     src.start(t); src.stop(t + 0.12);
+    const w = ctx.createOscillator();
+    w.type = 'sine';
+    w.frequency.setValueAtTime(180, t);
+    w.frequency.exponentialRampToValueAtTime(90, t + 0.45);
+    const wg = envGain(t, 0.02, 0.08, 0.35, pure ? 0.22 : 0.16);
+    w.connect(wg); wg.connect(master);
+    w.start(t); w.stop(t + 0.5);
   }
 
   function land(surface) {

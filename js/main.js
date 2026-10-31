@@ -9,6 +9,8 @@ import { buildWorld } from './world.js';
 import { DIFF, gradeSwing, dispersionYards, pathError, transitionRush } from './swing.js';
 import { createGolfer } from './golfer.js';
 import { createAudio } from './audio.js';
+import { createHaptics } from './haptics.js';
+import { createRange, createLab } from './sandbox.js';
 
 const $ = (id) => document.getElementById(id);
 const YD = 1.0936133, FT = 3.2808;
@@ -31,7 +33,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 12000);
 
 const W = buildWorld(renderer, scene, { mobile: isMobile });
-const course = W.course;
+let course = W.course;
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -42,7 +44,7 @@ let useBloom = true;
 
 function onResize() {
   camera.aspect = innerWidth / innerHeight;
-  camera.fov = camera.aspect < 1 ? 64 : 48;
+  camera.fov = 46;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setPixelRatio(pixelRatio); composer.setSize(innerWidth, innerHeight);
@@ -61,6 +63,15 @@ scene.add(blob);
 const golfer = createGolfer();
 scene.add(golfer.mesh);
 const audio = createAudio();
+const haptics = createHaptics();
+const range = createRange(THREE, scene);
+const lab = createLab(({ launch, env, club }) => {
+  if (S.mode !== 'range') return;
+  const res = P.simulate(course, { ...S.ball }, launch, env);
+  S.shot = { res, launch, club, putt: false, power: 1, grade: null, raw: { pts: [] }, start: { ...S.ball }, target: null, aimYaw: S.aimYaw };
+  S.playT = 0; S.stopT = 0; S.phase = 'flight'; S.camMode = 'chase'; S.cutDone = false;
+  tracerPts = [];
+});
 
 const MAXT = 3000;
 const trPos = new Float32Array(MAXT * 2 * 3), trCol = new Float32Array(MAXT * 2 * 3);
@@ -126,7 +137,7 @@ const S = {
   wind: { x: 0, z: 0, mph: 0, ang: 0 }, shot: null, playT: 0, prev: null, stopT: 0,
   difficulty: 'pro', holed: false, target: null, targetPower: 1, strike: null, streak: 0, goldTracer: false,
   vis: { s: 0, power: 0, path: 0, releasing: false, releaseRate: 1.6, holding: false, holdT: 0 },
-  hitStop: 0, shake: 0,
+  hitStop: 0, shake: 0, mode: 'hole',
 };
 const clubs = P.CLUBS;
 let dragTarget = null;
@@ -243,10 +254,11 @@ function newShotSetup() {
     S.phase = 'aim';
   } else {
     placeInitialTarget();
-    S.phase = 'overhead';
+    S.phase = 'aim';
   }
   updateHUD();
   updateAimVisuals();
+  cutToAddress();
 }
 
 function retryShot() {
@@ -316,7 +328,8 @@ function updateHUD() {
   const rel = S.wind.ang - S.aimYaw;
   $('windArrow').style.transform = `rotate(${(rel * 180 / Math.PI) - 90}deg)`;
   $('padHint').innerHTML = putting ? 'DRAG BACK<br/>THEN THROUGH' : (S.vis.s > 0.2 ? 'NOW STRAIGHT UP' : 'DRAG DOWN<br/>THEN STRAIGHT UP');
-  $('swingArea').classList.toggle('hidden', S.phase !== 'aim');
+  $('swingArea').classList.toggle('hidden', S.phase !== 'aim' && S.phase !== 'preview');
+  $('swingArea').classList.toggle('live', !!sw);
   $('aimBox').classList.toggle('hidden', S.phase === 'overhead');
   $('confirmBtn').classList.toggle('hidden', S.phase !== 'overhead');
   $('eyeBtn').classList.toggle('hidden', S.phase !== 'aim' || putting);
@@ -341,7 +354,7 @@ const ringColor = new THREE.Color();
 function updateAimVisuals() {
   const m = new THREE.Matrix4();
   const putting = isPutting();
-  const showTarget = !putting && S.target && (S.phase === 'overhead' || S.phase === 'aim' || S.phase === 'flight' || S.phase === 'settle' || S.phase === 'holed');
+  const showTarget = !putting && S.target && (S.phase === 'overhead' || S.phase === 'aim' || S.phase === 'preview' || S.phase === 'flight' || S.phase === 'settle' || S.phase === 'holed');
   targetRing.visible = !!showTarget;
   beacon.visible = !!showTarget;
   windMesh.visible = S.phase === 'overhead';
@@ -460,7 +473,8 @@ function takeShot(raw) {
   try { if (navigator.vibrate) navigator.vibrate(grade.allPerfect ? [12, 24, 28] : [10, 20, 14]); } catch (_) {}
   S.prev = { ...S.ball, lie: S.lie };
   S.strokes++;
-  const res = P.simulate(course, { ...S.ball }, launch, putt ? { x: 0, z: 0 } : S.wind, { putt });
+  const env = S.mode === 'range' ? lab.env() : (putt ? { x: 0, z: 0 } : S.wind);
+  const res = P.simulate(course, { ...S.ball }, launch, env, { putt });
   S.shot = { res, launch, club, putt, power: raw.power, grade, raw, start: { ...S.ball }, target: S.target ? { ...S.target } : null, aimYaw: S.aimYaw };
   S.playT = 0; S.stopT = 0; S.camMode = 'chase'; S.cutDone = false;
   tracerPts = [];
@@ -529,7 +543,7 @@ function finishShot() {
   let info = '';
   if (res.result === 'water') {
     S.strokes++;
-    if (course.isPondWater(f.x, f.z)) { placeBall(C.DROP_ZONE.x, C.DROP_ZONE.z); toast('WATER HAZARD · +1<br/><small>Drop zone</small>'); }
+    if (course.isPondWater && course.isPondWater(f.x, f.z)) { placeBall(C.DROP_ZONE.x, C.DROP_ZONE.z); toast('WATER HAZARD · +1<br/><small>Drop zone</small>'); }
     else { placeBall(S.prev.x, S.prev.z); S.lie = S.prev.lie; S.ball.y = S.prev.y; toast('IN THE OCEAN · +1<br/><small>Replay from previous spot</small>'); }
   } else if (res.result === 'holed') {
     S.ball = { x: C.PIN.x, y: course.heightAt(C.PIN.x, C.PIN.z) - 0.05, z: C.PIN.z };
@@ -541,7 +555,12 @@ function finishShot() {
   const miss = putt
     ? missPhrase(f, { x: C.PIN.x, z: C.PIN.z }, aimYaw, true)
     : (target ? missPhrase(land, target, aimYaw, false) : '');
-  if (grade) showGrade(raw, grade, miss);
+  if (grade) {
+    showGrade(raw, grade, miss);
+    if (!putt && grade.pathSign && (grade.path === 'Poor' || grade.path === 'Good')) {
+      showTip(grade.pathSign > 0 ? 'Pushed right: stay on the line.' : 'Pulled left: push straighter.');
+    } else if (!putt && grade.tempo === 'Poor') showTip('Tempo: backswing about three times the downswing.');
+  }
   if (putt) {
     info = `<div class="title">PUTT</div><div><div class="v">${(total * FT).toFixed(1)}</div><div class="k">FT ROLLED</div></div><div><div class="v">${(distToPin() * FT).toFixed(1)}</div><div class="k">FT LEFT</div></div><div><div class="v">${launch.speed.toFixed(1)}</div><div class="k">M/S</div></div><div><div class="v">${C.SURF_NAME[S.lie]}</div><div class="k">LIE</div></div>`;
   } else {
@@ -624,25 +643,40 @@ const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 const camPosT = new THREE.Vector3(), camLookT = new THREE.Vector3();
 const upVec = new THREE.Vector3(0, 1, 0);
 
-function setCamAddress() {
-  const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
-  const rx = -dz, rz = dx;
+function setCamPreview() {
+  if (!S.target) { setCamAddress(); return; }
   const b = S.ball;
-  const portrait = camera.aspect < 1;
-  if (isPutting()) {
-    const back = 4.1, side = 0.85;
-    camPosT.set(b.x - dx * back + rx * side, b.y + 1.55, b.z - dz * back + rz * side);
-    camLookT.set(b.x + dx * 0.15 + rx * 0.12, b.y + 0.7, b.z + dz * 0.15 + rz * 0.12);
-  } else {
-    const back = portrait ? 6.3 : 7.1;
-    const side = portrait ? 1.35 : 1.55;
-    const height = portrait ? 2.05 : 1.85;
-    camPosT.set(b.x - dx * back + rx * side, b.y + height, b.z - dz * back + rz * side);
-    const ahead = portrait ? 2.1 : 2.8;
-    camLookT.set(b.x + dx * ahead + rx * 0.05, b.y + 0.95, b.z + dz * ahead + rz * 0.05);
-  }
-  const h = course.heightAt(camPosT.x, camPosT.z) + 0.45;
+  const t = S.target;
+  const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
+  const dist = Math.max(8, Math.hypot(t.x - b.x, t.z - b.z));
+  const back = Math.min(26, Math.max(12, dist * 0.2));
+  const lift = Math.min(11, Math.max(4.5, dist * 0.08));
+  const px = t.x - dx * back, pz = t.z - dz * back;
+  camPosT.set(px, Math.max(course.heightAt(px, pz), C.WATER_LEVEL) + lift, pz);
+  camLookT.set(t.x, course.heightAt(t.x, t.z) + 0.45, t.z);
+  camUpT.copy(upVec);
+}
+
+function setCamAddress() {
+  // Camera, ball and target are collinear. Same offset in portrait and landscape.
+  const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
+  const b = S.ball;
+  const ground = b.y - P.BALL_R;
+  const back = 3.6;
+  camPosT.set(b.x - dx * back, ground + 1.7, b.z - dz * back);
+  camLookT.set(b.x + dx * 0.55, ground + 1.2, b.z + dz * 0.55);
+  const h = course.heightAt(camPosT.x, camPosT.z) + 0.3;
   if (camPosT.y < h) camPosT.y = h;
+}
+
+function cutToAddress() {
+  setCamAddress();
+  camPos.copy(camPosT);
+  camLook.copy(camLookT);
+  const veil = $('veil');
+  if (!veil) return;
+  veil.classList.add('on');
+  requestAnimationFrame(() => requestAnimationFrame(() => veil.classList.remove('on')));
 }
 
 function setCamOverhead() {
@@ -689,6 +723,9 @@ function updateCamera(dt) {
     camUpT.set(0, 1, 0);
   } else if (overhead) {
     setCamOverhead();
+  } else if (S.phase === 'preview') {
+    setCamPreview();
+    camUpT.copy(upVec);
   } else if (S.phase === 'aim' || S.phase === 'settle') {
     if (S.phase === 'aim') setCamAddress();
     camUpT.copy(upVec);
@@ -703,20 +740,25 @@ function updateCamera(dt) {
     } else {
       const flightT = res.frames.filter((f) => f.air).length / 60;
       const carryLen = res.carry ? Math.hypot(res.carry.x - shot.start.x, res.carry.z - shot.start.z) : 0;
-      if (!S.cutDone && carryLen > 40 && S.playT > flightT * 0.5) {
+      const hAbove = bp.y - course.heightAt(bp.x, bp.z);
+      if (!S.cutDone && carryLen > 30 && S.playT > flightT * 0.62 && hAbove < 18) {
         S.cutDone = true; S.camMode = 'landing';
-        const L = res.carry;
-        const side = (Math.random() < 0.5 ? -1 : 1);
-        const px = L.x - dx * 10 + dz * -side * 13, pz = L.z - dz * 10 + dx * side * 13;
-        camPos.set(px, Math.max(course.heightAt(px, pz), C.WATER_LEVEL) + 3.2, pz);
-        camLook.set(bp.x, bp.y, bp.z);
       }
       if (S.camMode === 'chase') {
-        camPosT.set(bp.x - dx * 9, bp.y + 2.2, bp.z - dz * 9);
-        const gh = Math.max(course.heightAt(camPosT.x, camPosT.z), C.WATER_LEVEL) + 1; if (camPosT.y < gh) camPosT.y = gh;
-        camLookT.set(bp.x + dx * 6, bp.y, bp.z + dz * 6);
+        const back = 11 + Math.min(8, hAbove * 0.12);
+        const rise = 2.4 + Math.min(6, hAbove * 0.18);
+        camPosT.set(bp.x - dx * back, bp.y + rise, bp.z - dz * back);
+        const gh = Math.max(course.heightAt(camPosT.x, camPosT.z), C.WATER_LEVEL) + 1.2;
+        if (camPosT.y < gh) camPosT.y = gh;
+        camLookT.set(bp.x + dx * 14, bp.y + Math.min(4, hAbove * 0.15), bp.z + dz * 14);
+        const widen = 46 + Math.min(8, hAbove * 0.12);
+        if (Math.abs(camera.fov - widen) > 0.4) { camera.fov = widen; camera.updateProjectionMatrix(); }
       } else {
-        camLookT.copy(bp);
+        const L = res.carry || { x: bp.x, z: bp.z };
+        const px = L.x - dx * 16 + dz * -8;
+        const pz = L.z - dz * 16 + dx * 8;
+        camPosT.set(px, Math.max(course.heightAt(px, pz), C.WATER_LEVEL) + 5.5, pz);
+        camLookT.set(bp.x, bp.y + 0.6, bp.z);
       }
     }
   }
@@ -774,6 +816,45 @@ $('closeSettings').onclick = () => {
   audio.setMuted($('muteChk').checked);
 };
 $('muteChk').onchange = () => { audio.unlock(); audio.setMuted($('muteChk').checked); };
+$('hapticChk').onchange = () => haptics.setEnabled($('hapticChk').checked);
+function showTip(text) {
+  let el = $('tip');
+  if (!el) { el = document.createElement('div'); el.id = 'tip'; $('hud').append(el); }
+  el.textContent = text;
+  el.classList.remove('hidden');
+  clearTimeout(showTip._t);
+  showTip._t = setTimeout(() => el.classList.add('hidden'), 2400);
+}
+function enterRange() {
+  S.mode = 'range';
+  course = range.course;
+  range.group.visible = true;
+  if (W.terrain) W.terrain.visible = false;
+  placeBall(range.tee.x, range.tee.z);
+  S.lie = C.SURF.TEE;
+  S.aimYaw = 0;
+  S.clubIdx = 2;
+  const reach = nominal[2] || 150;
+  S.target = { x: range.tee.x, z: range.tee.z - reach };
+  S.targetPower = 1;
+  S.phase = 'aim';
+  lab.show();
+  $('settings').classList.add('hidden');
+  updateHUD(); updateAimVisuals();
+  cutToAddress();
+}
+function leaveRangeMode() {
+  S.mode = 'hole';
+  course = W.course;
+  range.group.visible = false;
+  if (W.terrain) W.terrain.visible = true;
+  lab.hide();
+  $('settings').classList.add('hidden');
+  resetHole();
+}
+$('rangeBtn').onclick = () => enterRange();
+$('leaveRange').onclick = () => leaveRangeMode();
+if ($('clubBox')) $('clubBox').onclick = () => shiftClub(1);
 $('retryBtn').onclick = () => retryShot();
 $('confirmBtn').onclick = () => {
   if (S.phase !== 'overhead') return;
@@ -797,7 +878,27 @@ function groundPoint(e) {
   const hit = new THREE.Vector3();
   return raycaster.ray.intersectPlane(plane, hit) ? hit : null;
 }
+let aimDrag = null;
+function nudgeAim(dx) {
+  const sens = 0.0042;
+  S.aimYaw += dx * sens;
+  if (!isPutting()) {
+    const reach = nominal[S.clubIdx] || 1;
+    const have = S.target ? Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z) : reach;
+    const dist = Math.min(have, reach);
+    S.target = { x: S.ball.x + Math.sin(S.aimYaw) * dist, z: S.ball.z - Math.cos(S.aimYaw) * dist };
+    S.targetPower = dist / reach;
+    S.strike = null;
+  }
+  if (S.phase === 'aim') S.phase = 'preview';
+  updateHUD(); updateAimVisuals();
+}
 canvas.addEventListener('pointerdown', (e) => {
+  if (S.phase === 'aim' || S.phase === 'preview') {
+    aimDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, mode: 'aim' };
+    S.phase = 'preview';
+    return;
+  }
   if (S.phase !== 'overhead') return;
   const p = groundPoint(e);
   if (!p) return;
@@ -807,13 +908,25 @@ canvas.addEventListener('pointerdown', (e) => {
   updateHUD(); updateAimVisuals();
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (aimDrag && e.pointerId === aimDrag.id && aimDrag.mode === 'aim') {
+    nudgeAim(e.clientX - aimDrag.x);
+    aimDrag.x = e.clientX;
+    return;
+  }
   if (dragTarget !== e.pointerId || S.phase !== 'overhead') return;
   const p = groundPoint(e);
   if (!p) return;
   setTargetPoint(p.x, p.z);
   updateHUD(); updateAimVisuals();
 });
-const endDrag = (e) => { if (e.pointerId === dragTarget) dragTarget = null; };
+const endDrag = (e) => {
+  if (aimDrag && e.pointerId === aimDrag.id) {
+    aimDrag = null;
+    if (S.phase === 'preview') S.phase = 'aim';
+    updateHUD();
+  }
+  if (e.pointerId === dragTarget) dragTarget = null;
+};
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 
@@ -826,15 +939,20 @@ function resetPad() {
   if (!sw) showArc(0, isPutting() ? '0 ft' : '0%');
 }
 pad.addEventListener('pointerdown', (e) => {
-  if (S.phase !== 'aim' || S.vis.holding) return;
+  if ((S.phase !== 'aim' && S.phase !== 'preview') || S.vis.holding) return;
   e.preventDefault();
   pad.setPointerCapture(e.pointerId);
+  aimDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, mode: null, fromPad: true };
+});
+function beginSwing(e) {
   const r = pad.getBoundingClientRect();
   const p = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() };
   sw = { id: e.pointerId, r, x0: p.x, y0: p.y, max: 0, phase: 'back', pts: [p], trans: 0, fired: false, tDown: 0.3 };
   S.vis.releasing = false; S.vis.holding = false;
+  S.phase = 'aim';
+  $('swingArea').classList.add('live');
   $('padHint').style.opacity = '0';
-});
+}
 function visFromPull(pullNow) {
   const top = clamp(sw.max, 0.08, 1.25);
   if (sw.phase === 'back') {
@@ -859,6 +977,9 @@ function addMove(e) {
   if (sw.pts.length > 140) { sw.pts.shift(); if (sw.trans > 0) sw.trans--; }
   const span = sw.r.height * 0.62;
   const pull = (p.y - sw.y0) / span;
+  const dev = Math.abs(p.x - sw.x0) / Math.max(1, sw.r.width);
+  line.style.stroke = dev < 0.045 ? '#f7f4ee' : dev < 0.11 ? '#ffb05a' : '#ff4b6a';
+  haptics.tick(dev < 0.045 ? 0.18 : Math.min(1, dev * 5));
   line.setAttribute('points', sw.pts.map((q) => `${(q.x / sw.r.width) * 100},${(q.y / sw.r.height) * 100}`).join(' '));
   dot.style.left = p.x + 'px'; dot.style.top = p.y + 'px';
   if (sw.phase === 'back') {
@@ -869,7 +990,8 @@ function addMove(e) {
       sw.phase = 'fwd';
       sw.trans = sw.pts.length - 1;
       $('padHint').textContent = 'THROUGH';
-      try { if (navigator.vibrate) navigator.vibrate(12); } catch (_) {}
+      const tBack = Math.max(0.05, (p.t - sw.pts[0].t) / 1000);
+      haptics.pulse(tBack > 0.55 && tBack < 1.15 ? [16, 24, 20] : 14);
     }
     const tBack = Math.max(0.05, (p.t - sw.pts[0].t) / 1000);
     $('tempoRead').textContent = tBack < 0.4 ? 'QUICK' : tBack > 1.35 ? 'SLOW' : 'SET';
@@ -877,6 +999,7 @@ function addMove(e) {
   } else if (!sw.fired && pull <= 0.02 && sw.max > 0.08) {
     sw.fired = true;
     sw.tDown = Math.max(0.05, (p.t - sw.pts[sw.trans].t) / 1000);
+    haptics.pulse([10, 18, 26]);
     fireSwing();
   }
   if (sw && sw.phase === 'fwd') {
@@ -889,6 +1012,17 @@ function addMove(e) {
   visFromPull(pull);
 }
 pad.addEventListener('pointermove', (e) => {
+  if (aimDrag && e.pointerId === aimDrag.id && aimDrag.fromPad && !sw) {
+    const dx = e.clientX - aimDrag.x, dy = e.clientY - aimDrag.y;
+    if (!aimDrag.mode) {
+      if (Math.hypot(dx, dy) < 8) return;
+      aimDrag.mode = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'aim' : 'swing';
+      if (aimDrag.mode === 'swing') { beginSwing(e); aimDrag = null; }
+      else S.phase = 'preview';
+    }
+    if (aimDrag && aimDrag.mode === 'aim') { nudgeAim(e.clientX - aimDrag.x); aimDrag.x = e.clientX; }
+    return;
+  }
   if (!sw || e.pointerId !== sw.id) return;
   const list = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of list) addMove(ev);
@@ -926,6 +1060,8 @@ pad.addEventListener('pointerup', (e) => {
     showArc(0, isPutting() ? '0 ft' : '0%');
   }
   sw = null; resetPad();
+  $('swingArea').classList.remove('live');
+  if (aimDrag && e.pointerId === aimDrag.id) { aimDrag = null; if (S.phase === 'preview') S.phase = 'aim'; }
 });
 pad.addEventListener('pointercancel', () => { sw = null; S.vis.s = 0; resetPad(); });
 
@@ -981,7 +1117,7 @@ function projectTag(el, world, show) {
 }
 const targetWorld = new THREE.Vector3();
 function updatePinMarker() {
-  const show = S.phase === 'aim' && distToPin() > 12;
+  const show = false && S.phase === 'aim' && distToPin() > 12;
   if (!show) pm.style.display = 'none';
   else {
     const v = pinTop.clone().project(camera);
@@ -994,7 +1130,7 @@ function updatePinMarker() {
     }
   }
   const tag = $('targetTag');
-  if (S.target && (S.phase === 'overhead' || S.phase === 'aim') && !isPutting()) {
+  if (S.target && (S.phase === 'overhead' || S.phase === 'preview') && !isPutting()) {
     const yds = Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z) * YD;
     $('targetTagDist').textContent = yds.toFixed(0) + ' yds';
     targetWorld.set(S.target.x, course.heightAt(S.target.x, S.target.z) + 1.2, S.target.z);
@@ -1088,8 +1224,8 @@ function frame() {
     haloMat.opacity = 0.28 + 0.2 * Math.sin(elapsed * 4);
   }
   const over = S.phase === 'overhead' ? 1 : 0;
-  renderer.toneMappingExposure = 0.62 + over * 0.7;
-  if (scene.fog) scene.fog.density = 0.001 - over * 0.00086;
+  renderer.toneMappingExposure = 0.72 + over * 0.45;
+  if (scene.fog) scene.fog.density = S.phase === 'flight' ? 0.00042 : 0.00072;
   if (W.hemi) W.hemi.intensity = 0.75 + over * 1.55;
   if (W.sun) {
     W.sun.intensity = 3.2 + over * 1.5;
