@@ -6,15 +6,17 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as C from './course.js';
 import * as P from './physics.js';
 import { buildWorld } from './world.js';
+import { DIFF, gradeSwing, dispersionYards, pathError, transitionRush } from './swing.js';
+import { createGolfer } from './golfer.js';
 
 const $ = (id) => document.getElementById(id);
 const YD = 1.0936133, FT = 3.2808;
 const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
 const params = new URLSearchParams(location.search);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-// ---------- renderer ----------
 const canvas = $('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('shot') });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: params.has('shot') || params.has('pose') });
 let pixelRatio = Math.min(window.devicePixelRatio || 1, isMobile ? 1.75 : 2);
 renderer.setPixelRatio(pixelRatio);
 renderer.setSize(innerWidth, innerHeight);
@@ -49,12 +51,14 @@ function onResize() {
 const fx = $('fx'), fxc = fx.getContext('2d');
 addEventListener('resize', onResize); onResize();
 
-// ---------- ball, shadow blob, tracer, target ring ----------
 const ball = new THREE.Mesh(new THREE.SphereGeometry(P.BALL_R, 28, 20), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.2 }));
 ball.castShadow = false; scene.add(ball);
 const blobTex = (() => { const cv = document.createElement('canvas'); cv.width = cv.height = 64; const g = cv.getContext('2d'); const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(0,0,0,.65)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(cv); })();
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
 scene.add(blob);
+
+const golfer = createGolfer();
+scene.add(golfer.mesh);
 
 const MAXT = 3000;
 const trPos = new Float32Array(MAXT * 2 * 3), trCol = new Float32Array(MAXT * 2 * 3);
@@ -67,15 +71,23 @@ tracer.frustumCulled = false; scene.add(tracer);
 let tracerPts = [];
 
 const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.4, 2.4, 2.8), transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
-const targetRing = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.1, 48).rotateX(-Math.PI / 2), ringMat);
-const targetDot = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24).rotateX(-Math.PI / 2), ringMat);
+const targetRing = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 48).rotateX(-Math.PI / 2), ringMat);
+const targetDot = new THREE.Mesh(new THREE.CircleGeometry(0.16, 20).rotateX(-Math.PI / 2), ringMat);
 targetRing.add(targetDot); scene.add(targetRing);
+const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 6, 8), new THREE.MeshBasicMaterial({ color: 0x9fffff, transparent: true, opacity: 0.28, depthWrite: false, toneMapped: false }));
+scene.add(beacon);
 
-// aim line (dashes)
+const windMat = new THREE.MeshBasicMaterial({ color: 0x3ff3ff, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false, side: THREE.DoubleSide });
+const windMesh = new THREE.Group();
+const windShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 10, 8), windMat);
+windShaft.rotation.x = Math.PI / 2; windShaft.position.z = 5;
+const windHead = new THREE.Mesh(new THREE.ConeGeometry(1.1, 3.2, 10), windMat);
+windHead.rotation.x = Math.PI / 2; windHead.position.z = 11.2;
+windMesh.add(windShaft, windHead); scene.add(windMesh);
+
 const aimDots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.05, 12).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.5, 2.5, 2.5), transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }), 40);
 aimDots.frustumCulled = false; scene.add(aimDots);
 
-// slope chevrons on the green (putting view)
 const chevGeo = new THREE.BufferGeometry();
 chevGeo.setAttribute('position', new THREE.Float32BufferAttribute([-0.16, 0, 0.1, 0, 0, -0.12, 0.16, 0, 0.1, 0.16, 0, 0.18, 0, 0, -0.04, -0.16, 0, 0.18], 3));
 chevGeo.setIndex([0, 1, 4, 0, 4, 5, 1, 2, 3, 1, 3, 4]);
@@ -90,7 +102,6 @@ const chev = new THREE.InstancedMesh(chevGeo, new THREE.MeshBasicMaterial({ tran
 chev.frustumCulled = false; chev.visible = false; scene.add(chev);
 chevPts.forEach((c, i) => { const k = Math.min(1, c.slope / 0.035); chev.setColorAt(i, new THREE.Color().setHSL(0.55 - 0.55 * k, 1, 0.62).multiplyScalar(1.15)); });
 
-// splash particles
 const splashN = 140;
 const splashGeo = new THREE.BufferGeometry(); splashGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(splashN * 3), 3));
 const splash = new THREE.Points(splashGeo, new THREE.PointsMaterial({ color: 0xe8f6ff, size: 0.18, transparent: true, opacity: 0.9, depthWrite: false }));
@@ -102,13 +113,20 @@ function doSplash(x, z) {
   a.needsUpdate = true; splash.visible = true; splashT = 0;
 }
 
-// ---------- game state ----------
 const S = {
   phase: 'intro', strokes: 0, clubIdx: 3, aimYaw: 0, ball: { x: 0, y: 0, z: 0 }, lie: C.SURF.TEE,
-  wind: { x: 0, z: 0, mph: 0, ang: 0 }, shot: null, playT: 0, prev: null, stopT: 0, motion: false,
-  sens: 850, assist: true, holed: false,
+  wind: { x: 0, z: 0, mph: 0, ang: 0 }, shot: null, playT: 0, prev: null, stopT: 0,
+  difficulty: 'pro', holed: false, target: null, targetPower: 1, strike: null, streak: 0, goldTracer: false,
+  vis: { s: 0, power: 0, path: 0, releasing: false, releaseRate: 1.6, holding: false, holdT: 0 },
 };
 const clubs = P.CLUBS;
+let dragTarget = null;
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const _v = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const camUp = new THREE.Vector3(0, 1, 0);
+const camUpT = new THREE.Vector3(0, 1, 0);
 
 function rollWind() {
   const mph = 1 + Math.random() * 7; const ang = Math.random() * Math.PI * 2;
@@ -117,7 +135,6 @@ function rollWind() {
   $('windVal').textContent = mph.toFixed(0) + ' mph';
 }
 
-// Nominal straight-carry for each club (flat ground, no wind)
 const flatCourse = { heightAt: () => 0, normalAt: () => ({ x: 0, y: 1, z: 0 }), surfaceAt: () => C.SURF.FAIRWAY };
 const nominal = clubs.map((c) => {
   if (c.putter) return 0;
@@ -128,6 +145,10 @@ const nominal = clubs.map((c) => {
 function distToPin(p = S.ball) { return Math.hypot(C.PIN.x - p.x, C.PIN.z - p.z); }
 function yawToPin(p = S.ball) { return Math.atan2(C.PIN.x - p.x, -(C.PIN.z - p.z)); }
 function isPutting() { return clubs[S.clubIdx].putter; }
+function fmtDist(m) { return m < 20 ? (m * FT).toFixed(0) + ' ft' : (m * YD).toFixed(0) + ' yds'; }
+function puttScale() { return Math.max(4, Math.min(30, distToPin() * 1.5)); }
+function puttDistNeeded() { return distToPin(); }
+const PUTT_FR = 0.058 * 9.81;
 
 function placeBall(x, z) {
   S.ball = { x, y: course.heightAt(x, z) + P.BALL_R, z };
@@ -143,104 +164,322 @@ function autoClub() {
   S.clubIdx = best;
 }
 
+function clubForDistance(dist) {
+  let best = clubs.length - 2, bestPen = 1e9;
+  for (let i = 0; i < clubs.length - 1; i++) {
+    const carry = nominal[i];
+    if (carry < 1) continue;
+    const p = dist / carry;
+    const pen = p > 1.001 ? 10 + (p - 1) * 10 : (p < 0.5 ? (0.5 - p) * 3 : Math.abs(0.9 - p));
+    if (pen < bestPen) { bestPen = pen; best = i; }
+  }
+  const carry = nominal[best] || 1;
+  const power = clamp(dist / carry, 0.32, 1);
+  return { idx: best, power, dist: power * carry };
+}
+
+function setTargetPoint(x, z) {
+  let dx = x - S.ball.x, dz = z - S.ball.z;
+  let dist = Math.hypot(dx, dz);
+  if (dist < 0.4) return;
+  dist = Math.min(dist, nominal[0]);
+  const sug = clubForDistance(dist);
+  S.clubIdx = sug.idx;
+  dist = clamp(sug.dist, nominal[S.clubIdx] * 0.32, nominal[S.clubIdx]);
+  const yaw = Math.atan2(dx, -dz);
+  S.aimYaw = yaw;
+  S.target = { x: S.ball.x + Math.sin(yaw) * dist, z: S.ball.z - Math.cos(yaw) * dist };
+  S.targetPower = dist / nominal[S.clubIdx];
+  S.strike = null;
+}
+
+function reclampTargetToClub() {
+  if (!S.target || isPutting()) return;
+  const dx = S.target.x - S.ball.x, dz = S.target.z - S.ball.z;
+  let dist = Math.hypot(dx, dz);
+  const yaw = Math.atan2(dx, -dz);
+  dist = clamp(dist, nominal[S.clubIdx] * 0.32, nominal[S.clubIdx]);
+  S.aimYaw = yaw;
+  S.target = { x: S.ball.x + Math.sin(yaw) * dist, z: S.ball.z - Math.cos(yaw) * dist };
+  S.targetPower = dist / nominal[S.clubIdx];
+  S.strike = null;
+}
+
+function placeInitialTarget() {
+  const dPin = distToPin();
+  const reach = nominal[0];
+  let dist = Math.min(dPin, reach);
+  const sug = clubForDistance(dist);
+  S.clubIdx = sug.idx;
+  dist = clamp(Math.min(dPin, nominal[S.clubIdx]), nominal[S.clubIdx] * 0.32, nominal[S.clubIdx]);
+  const yaw = yawToPin();
+  S.aimYaw = yaw;
+  S.target = { x: S.ball.x + Math.sin(yaw) * dist, z: S.ball.z - Math.cos(yaw) * dist };
+  S.targetPower = dist / nominal[S.clubIdx];
+  S.strike = null;
+}
+
 function newShotSetup() {
-  S.aimYaw = yawToPin();
   autoClub();
-  S.phase = 'aim';
+  S.strike = null;
+  S.vis.releasing = false;
+  S.vis.holding = false;
+  S.vis.s = 0;
+  S.vis.power = 0;
+  S.vis.path = 0;
+  if (isPutting()) {
+    S.aimYaw = yawToPin();
+    S.target = null;
+    S.targetPower = clamp(puttDistNeeded() / puttScale(), 0.08, 1);
+    S.phase = 'aim';
+  } else {
+    placeInitialTarget();
+    S.phase = 'overhead';
+  }
   updateHUD();
   updateAimVisuals();
-  setCamAddress(true);
 }
 
 function resetHole() {
   S.strokes = 0; S.holed = false; tracerPts = []; updateTracer();
-  placeBall(0, -4.5); S.lie = C.SURF.TEE; S.ball.y += 0.02; // teed up
+  placeBall(0, -4.5); S.lie = C.SURF.TEE; S.ball.y += 0.02;
   rollWind();
-  $('bigMsg').classList.add('hidden'); $('shotInfo').classList.add('hidden');
+  $('bigMsg').classList.add('hidden');
+  $('shotInfo').classList.add('hidden');
+  $('gradeCard').classList.add('hidden');
+  $('perfectFlash').classList.add('hidden');
   newShotSetup();
+}
+
+function setDifficulty(id) {
+  S.difficulty = DIFF[id] ? id : 'pro';
+  $('diffBadge').textContent = DIFF[S.difficulty].badge;
+  $('diffSel').value = S.difficulty;
+  S.strike = null;
+  try { localStorage.setItem('vl_diff', S.difficulty); } catch (_) {}
+  updateAimVisuals();
+}
+
+function arcPoint(t) {
+  const path = $('arcTrack');
+  if (!path.getTotalLength) return;
+  const len = path.getTotalLength();
+  const p = path.getPointAtLength(len * clamp(t, 0, 1));
+  $('arcTick').setAttribute('cx', p.x);
+  $('arcTick').setAttribute('cy', p.y);
+}
+
+function showArc(power, label) {
+  const p = clamp(power, 0, 1.2);
+  $('arcFill').setAttribute('stroke-dashoffset', String(100 * (1 - Math.min(1, p))));
+  $('arcOver').setAttribute('opacity', p > 1 ? String(0.45 + (p - 1) * 2.2) : '0.18');
+  $('arcLbl').textContent = label ?? (Math.round(p * 100) + '%');
+  $('arcLbl').classList.toggle('over', p > 1.001);
 }
 
 function updateHUD() {
   const club = clubs[S.clubIdx];
+  const putting = isPutting();
   $('clubId').textContent = club.id;
   $('clubCarry').textContent = club.putter ? 'putter' : (nominal[S.clubIdx] * YD).toFixed(0) + ' yds';
   $('strokeLbl').textContent = 'STROKE ' + (S.strokes + 1);
   $('lieLbl').textContent = 'Lie: ' + C.SURF_NAME[S.lie];
   const d = distToPin();
-  $('toPin').textContent = (isPutting() || d < 20) ? (d * FT).toFixed(0) + ' ft' : (d * YD).toFixed(0) + ' yds';
+  $('toPin').textContent = (putting || d < 20) ? (d * FT).toFixed(0) + ' ft' : (d * YD).toFixed(0) + ' yds';
   $('holeYds').textContent = (Math.hypot(C.PIN.x, C.PIN.z + 4.5) * YD).toFixed(0) + ' YDS';
-  // wind arrow relative to aim direction (screen up = aim)
   const rel = S.wind.ang - S.aimYaw;
   $('windArrow').style.transform = `rotate(${(rel * 180 / Math.PI) - 90}deg)`;
-  $('padHint').innerHTML = isPutting() ? 'PULL BACK<br/>then PUSH UP' : 'PULL DOWN<br/>then FLICK UP';
-  $('meterTarget').style.display = isPutting() ? 'block' : 'none';
-  if (isPutting()) $('meterTarget').style.bottom = (Math.min(1, puttDistNeeded() / puttScale()) / 1.1 * 100) + '%';
+  $('padHint').innerHTML = putting ? 'DRAG BACK<br/>THEN THROUGH' : (S.vis.s > 0.2 ? 'NOW STRAIGHT UP' : 'DRAG DOWN<br/>THEN STRAIGHT UP');
+  $('swingArea').classList.toggle('hidden', S.phase !== 'aim');
+  $('aimBox').classList.toggle('hidden', S.phase === 'overhead');
+  $('confirmBtn').classList.toggle('hidden', S.phase !== 'overhead');
+  $('eyeBtn').classList.toggle('hidden', S.phase !== 'aim' || putting);
+  const showTargetCard = !!S.target && !putting && (S.phase === 'overhead' || S.phase === 'aim');
+  $('targetCard').classList.toggle('hidden', !showTargetCard);
+  $('targetHint').style.display = S.phase === 'overhead' ? '' : 'none';
+  if (S.target) {
+    const toT = Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z);
+    const toP = Math.hypot(C.PIN.x - S.target.x, C.PIN.z - S.target.z);
+    $('toTarget').textContent = fmtDist(toT);
+    $('targetPin').textContent = fmtDist(toP);
+  }
+  const tick = putting ? S.targetPower : (S.targetPower || 0);
+  arcPoint(tick);
+  $('streakVal').textContent = String(S.streak);
+  $('streakCard').classList.toggle('hot', S.streak > 0);
+  document.body.classList.toggle('overhead', S.phase === 'overhead');
 }
 
-// putting scale: full meter = this many metres on flat green
-function puttScale() { return Math.max(4, Math.min(30, distToPin() * 1.5)); }
-function puttDistNeeded() { return distToPin(); }
-const PUTT_FR = 0.058 * 9.81;
-
+const ringColor = new THREE.Color();
 function updateAimVisuals() {
   const m = new THREE.Matrix4();
   const putting = isPutting();
-  targetRing.visible = !putting && S.phase === 'aim';
+  const showTarget = !putting && S.target && (S.phase === 'overhead' || S.phase === 'aim' || S.phase === 'flight' || S.phase === 'settle' || S.phase === 'holed');
+  targetRing.visible = !!showTarget;
+  beacon.visible = !!showTarget;
+  windMesh.visible = S.phase === 'overhead';
   chev.visible = putting && S.phase === 'aim';
-  aimDots.visible = S.phase === 'aim';
+  aimDots.visible = S.phase === 'aim' || S.phase === 'overhead';
   const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
-  const L = putting ? Math.min(distToPin(), 6) : 12;
+  const full = S.phase === 'overhead' && S.target ? Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z) : (putting ? Math.min(distToPin(), 6) : 8);
   for (let i = 0; i < 40; i++) {
-    const t = 0.4 + i / 39 * L;
+    const t = 0.35 + (i / 39) * full;
     const x = S.ball.x + dx * t, z = S.ball.z + dz * t;
-    m.makeTranslation(x, course.heightAt(x, z) + 0.02, z); aimDots.setMatrixAt(i, m);
+    m.makeTranslation(x, course.heightAt(x, z) + 0.03, z);
+    aimDots.setMatrixAt(i, m);
   }
   aimDots.instanceMatrix.needsUpdate = true;
-  if (!putting) {
-    const club = clubs[S.clubIdx];
-    const r = P.simulate(course, { ...S.ball }, P.launchFromSwing(club, 1, 0, S.aimYaw, S.lie), S.wind);
-    const c = r.carry || r.final;
-    targetRing.position.set(c.x, course.heightAt(c.x, c.z) + 0.08, c.z);
-    const n = course.normalAt(c.x, c.z); targetRing.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(n.x, n.y, n.z));
-    const s = Math.max(0.6, Math.hypot(c.x - S.ball.x, c.z - S.ball.z) / 120); targetRing.scale.setScalar(s);
+  if (showTarget) {
+    const c = S.target;
+    const y = course.heightAt(c.x, c.z);
+    targetRing.position.set(c.x, y + 0.12, c.z);
+    const n = course.normalAt(c.x, c.z);
+    _v.set(n.x, n.y, n.z);
+    targetRing.quaternion.setFromUnitVectors(upVec, _v);
+    const yards = dispersionYards(S.difficulty, S.clubIdx);
+    const radius = Math.max(1.15, yards / YD);
+    targetRing.scale.setScalar(radius);
+    beacon.position.set(c.x, y + 3.1, c.z);
+    beacon.scale.set(1, Math.max(0.6, radius * 0.35), 1);
+    const surf = course.surfaceAt(c.x, c.z);
+    const hex = surf === C.SURF.GREEN || surf === C.SURF.FRINGE ? 0x39ffb0 : surf === C.SURF.BUNKER ? 0xffb05a : surf === C.SURF.WATER ? 0x3ec2ff : surf === C.SURF.ROUGH ? 0xd6ff6a : 0xb7fff8;
+    ringColor.setHex(hex);
+    ringMat.color.copy(ringColor);
+    beacon.material.color.copy(ringColor);
+  }
+  if (S.phase === 'overhead') {
+    const wx = S.ball.x + 16, wz = S.ball.z + 6;
+    windMesh.position.set(wx, course.heightAt(wx, wz) + 0.5, wz);
+    windMesh.rotation.y = Math.atan2(S.wind.x, S.wind.z);
   }
 }
 
-// ---------- shooting ----------
-function takeShot(power, face) {
-  if (S.phase !== 'aim') return;
+function ensureStrike() {
+  if (isPutting() || !S.target) { S.strike = null; return; }
+  const d = DIFF[S.difficulty];
+  const mods = d.perfectBonus ? { speedMul: 1.03, spinMul: 1.22 } : { speedMul: 1, spinMul: 1 };
+  let yaw = S.aimYaw;
+  let power = clamp(S.targetPower, 0.2, 1.05);
   const club = clubs[S.clubIdx];
-  let launch, putt = false;
-  if (club.putter) {
-    putt = true;
-    const D = Math.max(0.2, power) * puttScale();
-    const v = Math.sqrt(2 * PUTT_FR * D);
-    launch = P.launchPutt(v, S.aimYaw + face * 0.25 * Math.PI / 180);
-  } else {
-    if (power > 1.0) face += (Math.random() - 0.5) * (power - 1) * 60;
-    if (S.assist) face *= 0.6;
-    launch = P.launchFromSwing(club, power, face, S.aimYaw, S.lie);
+  const tx = S.target.x - S.ball.x, tz = S.target.z - S.ball.z;
+  const want = Math.hypot(tx, tz) || 0.01;
+  for (let i = 0; i < 5; i++) {
+    const launch = P.launchFromSwing(club, power, 0, yaw, S.lie, mods);
+    const res = P.simulate(course, { ...S.ball }, launch, S.wind);
+    const c = res.carry || res.final;
+    const dx = c.x - S.ball.x, dz = c.z - S.ball.z;
+    const got = Math.hypot(dx, dz) || 0.01;
+    const cross = tx * dz - tz * dx;
+    const latM = cross / want;
+    power = clamp(power * (want / got), 0.18, 1.06);
+    yaw += Math.atan2(latM, got) * 0.85;
+    if (Math.abs(got - want) < 0.45 && Math.abs(latM) < 0.45) break;
   }
+  S.strike = { yaw, power, mods, club: S.clubIdx };
+}
+
+function takeShot(raw) {
+  if (S.phase !== 'aim') return;
+  const grade = gradeSwing(raw, S.difficulty);
+  const club = clubs[S.clubIdx];
+  const putting = !!raw.putting;
+  let launch, putt = false;
+  if (putting) {
+    putt = true;
+    const D = Math.max(0.25, raw.power) * puttScale() * grade.speedMul;
+    const yaw = S.aimYaw + grade.pushDeg * Math.PI / 180;
+    launch = P.launchPutt(Math.sqrt(2 * PUTT_FR * D), yaw + grade.faceDeg * 0.35 * Math.PI / 180);
+  } else {
+    ensureStrike();
+    const strike = S.strike;
+    let power = raw.power;
+    let yaw = (strike ? strike.yaw : S.aimYaw) + grade.pushDeg * Math.PI / 180;
+    let face = grade.faceDeg;
+    let mods = { speedMul: grade.speedMul, spinMul: 1 };
+    if (grade.snapToTarget && strike) {
+      power = strike.power;
+      yaw = strike.yaw + grade.pushDeg * 0.08 * Math.PI / 180;
+      face *= 0.08;
+      mods = { speedMul: strike.mods.speedMul, spinMul: strike.mods.spinMul };
+    }
+    launch = P.launchFromSwing(club, power, face, yaw, S.lie, mods);
+  }
+  if (grade.allPerfect) S.streak++; else S.streak = 0;
+  S.goldTracer = !!grade.perfectBonus;
+  S.vis.path = clamp((grade.pathSign || 0) * (grade.pathMag || 0) / 0.1, -1, 1);
+  S.vis.power = raw.power;
+  if (grade.perfectBonus) showPerfect();
   S.prev = { ...S.ball, lie: S.lie };
   S.strokes++;
   const res = P.simulate(course, { ...S.ball }, launch, putt ? { x: 0, z: 0 } : S.wind, { putt });
-  S.shot = { res, launch, club, putt, power, face, start: { ...S.ball } };
+  S.shot = { res, launch, club, putt, power: raw.power, grade, raw, start: { ...S.ball }, target: S.target ? { ...S.target } : null, aimYaw: S.aimYaw };
   S.playT = 0; S.stopT = 0; S.camMode = 'chase'; S.cutDone = false;
   tracerPts = [];
   S.phase = 'flight';
   updateAimVisuals();
+  updateHUD();
   $('shotInfo').classList.add('hidden');
-  hideMeter();
+  showGrade(raw, grade, '');
+}
+
+let perfectT = 0;
+function showPerfect() {
+  const el = $('perfectFlash');
+  el.textContent = S.streak > 1 ? `PERFECT!  ×${S.streak}` : 'PERFECT!';
+  el.classList.remove('hidden');
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = '';
+  clearTimeout(perfectT);
+  perfectT = setTimeout(() => el.classList.add('hidden'), 1300);
+  try { if (navigator.vibrate) navigator.vibrate([40, 30, 80]); } catch (_) {}
+}
+
+function missPhrase(land, target, aimYaw, putt) {
+  const vx = land.x - target.x, vz = land.z - target.z;
+  const dx = Math.sin(aimYaw), dz = -Math.cos(aimYaw);
+  const forward = vx * dx + vz * dz;
+  const right = vx * (-dz) + vz * dx;
+  const unit = putt ? FT : YD;
+  const word = putt ? 'ft' : 'yds';
+  const side = right * unit, long = forward * unit;
+  const bits = [];
+  const lim = putt ? 0.6 : 0.8;
+  if (Math.abs(side) >= lim) bits.push(`${Math.abs(side).toFixed(0)} ${word} ${side > 0 ? 'right' : 'left'} of ${putt ? 'the hole' : 'target'}`);
+  if (Math.abs(long) >= lim) bits.push(`${Math.abs(long).toFixed(0)} ${word} ${long > 0 ? (putt ? 'past the hole' : 'past target') : (putt ? 'short of the hole' : 'short of target')}`);
+  if (!bits.length) return putt ? 'On the hole' : 'On the target';
+  return bits.join(' · ');
+}
+
+function showGrade(raw, grade, miss) {
+  const set = (id, val) => { const el = $(id); el.textContent = val; el.className = 'g-' + val; };
+  set('gTempo', grade.tempo); set('gPath', grade.path); set('gPower', grade.power);
+  $('gradeTitle').textContent = raw.putting ? 'PUTT' : 'SWING';
+  $('gradeNote').textContent = grade.note || '';
+  $('gradeMiss').textContent = miss || '';
+  const pts = raw.pts || [];
+  if (pts.length) {
+    const x0 = raw.transX ?? pts[0].x;
+    let minY = Infinity, maxY = -Infinity;
+    for (const p of pts) { minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+    const h = Math.max(8, maxY - minY);
+    $('gradeLine').setAttribute('points', pts.map((p) => {
+      const x = clamp(32 + (p.x - x0) * 0.42, 3, 61);
+      const y = 90 - ((p.y - minY) / h) * 82;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' '));
+  }
+  $('gradeCard').classList.remove('hidden');
 }
 
 function finishShot() {
-  const { res, launch, club, putt, start } = S.shot;
+  const { res, launch, club, putt, start, grade, raw, target, aimYaw } = S.shot;
   const f = res.final;
   const carry = res.carry ? Math.hypot(res.carry.x - start.x, res.carry.z - start.z) : 0;
   const total = Math.hypot(f.x - start.x, f.z - start.z);
   let info = '';
   if (res.result === 'water') {
-    S.strokes++; // penalty
+    S.strokes++;
     if (course.isPondWater(f.x, f.z)) { placeBall(C.DROP_ZONE.x, C.DROP_ZONE.z); toast('WATER HAZARD · +1<br/><small>Drop zone</small>'); }
     else { placeBall(S.prev.x, S.prev.z); S.lie = S.prev.lie; S.ball.y = S.prev.y; toast('IN THE OCEAN · +1<br/><small>Replay from previous spot</small>'); }
   } else if (res.result === 'holed') {
@@ -249,14 +488,19 @@ function finishShot() {
     placeBall(f.x, f.z);
   }
   const yd = (m) => (m * YD).toFixed(0);
+  const land = res.carry || f;
+  const miss = putt
+    ? missPhrase(f, { x: C.PIN.x, z: C.PIN.z }, aimYaw, true)
+    : (target ? missPhrase(land, target, aimYaw, false) : '');
+  if (grade) showGrade(raw, grade, miss);
   if (putt) {
     info = `<div class="title">PUTT</div><div><div class="v">${(total * FT).toFixed(1)}</div><div class="k">FT ROLLED</div></div><div><div class="v">${(distToPin() * FT).toFixed(1)}</div><div class="k">FT LEFT</div></div><div><div class="v">${launch.speed.toFixed(1)}</div><div class="k">M/S</div></div><div><div class="v">${C.SURF_NAME[S.lie]}</div><div class="k">LIE</div></div>`;
   } else {
     const side = (f.x - start.x) * Math.cos(S.aimYaw) + (f.z - start.z) * Math.sin(S.aimYaw);
-    info = `<div class="title">${club.name.toUpperCase()} · ${(S.shot.power * 100).toFixed(0)}% POWER</div>
+    info = `<div class="title">${club.name.toUpperCase()} · ${(S.shot.power * 100).toFixed(0)}%</div>
       <div><div class="v">${yd(carry)}</div><div class="k">CARRY YDS</div></div>
       <div><div class="v">${yd(total)}</div><div class="k">TOTAL YDS</div></div>
-      <div><div class="v">${res.result === 'holed' ? '0' : (distToPin() < 20 ? (distToPin() * FT).toFixed(0) + 'ft' : yd(distToPin()))}</div><div class="k">TO PIN${distToPin() < 20 ? '' : ' YDS'}</div></div>
+      <div><div class="v">${res.result === 'holed' ? '0' : (distToPin() < 20 ? (distToPin() * FT).toFixed(0) + 'ft' : yd(distToPin()))}</div><div class="k">TO PIN</div></div>
       <div><div class="v">${Math.abs(side * YD).toFixed(0)}${side > 0.5 ? 'R' : side < -0.5 ? 'L' : ''}</div><div class="k">OFFLINE</div></div>
       <div><div class="v">${(launch.speed / 0.44704).toFixed(0)}</div><div class="k">BALL MPH</div></div>
       <div><div class="v">${launch.launchDeg.toFixed(1)}°</div><div class="k">LAUNCH</div></div>
@@ -269,7 +513,7 @@ function finishShot() {
     if (S.lie === C.SURF.BUNKER) toast('IN THE BUNKER');
     else if (S.lie === C.SURF.GREEN && !putt) toast('ON THE GREEN');
   }
-  setTimeout(() => { if (S.phase === 'settle') newShotSetup(); }, res.result === 'water' ? 1500 : 600);
+  setTimeout(() => { if (S.phase === 'settle') newShotSetup(); }, res.result === 'water' ? 1500 : 700);
   S.phase = 'settle';
 }
 
@@ -287,7 +531,6 @@ function holed() {
 let toastTimer;
 function toast(html) { const t = $('toast'); t.innerHTML = html; t.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 2200); }
 
-// confetti
 let confettiP = [];
 function confetti(n) {
   const cols = ['#ff3fa4', '#3ff3ff', '#ffb05a', '#ffffff', '#b46bff', '#ffe14a'];
@@ -303,10 +546,10 @@ function drawConfetti(dt) {
   confettiP = confettiP.filter((p) => p.y < fx.height + 40 && p.life < 8);
 }
 
-// ---------- tracer ----------
 function updateTracer() {
   const n = tracerPts.length;
   const cp = camera.position;
+  const gold = S.goldTracer;
   for (let i = 0; i < n; i++) {
     const p = tracerPts[i], q = tracerPts[Math.min(n - 1, i + 1)], o = tracerPts[Math.max(0, i - 1)];
     const tx = q.x - o.x, ty = q.y - o.y, tz = q.z - o.z;
@@ -318,34 +561,56 @@ function updateTracer() {
     sx *= w / sl; sy *= w / sl; sz *= w / sl;
     trPos.set([p.x + sx, p.y + sy, p.z + sz, p.x - sx, p.y - sy, p.z - sz], i * 6);
     const k = i / Math.max(1, n - 1);
-    const r = 2.2, g = 0.5 + 1.2 * k, b = 1.6 - 1.0 * k;
-    const fade = 0.35 + 0.65 * k;
+    const r = gold ? 2.5 : 2.2, g = gold ? 1.9 : 0.5 + 1.2 * k, b = gold ? 0.4 : 1.6 - 1.0 * k;
+    const fade = 0.45 + 0.55 * k;
     trCol.set([r * fade, g * fade, b * fade, r * fade, g * fade, b * fade], i * 6);
   }
   trGeo.attributes.position.needsUpdate = true; trGeo.attributes.color.needsUpdate = true;
   trGeo.setDrawRange(0, Math.max(0, (n - 1) * 6));
 }
 
-// ---------- camera ----------
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 const camPosT = new THREE.Vector3(), camLookT = new THREE.Vector3();
-function setCamAddress(snap) {
+const upVec = new THREE.Vector3(0, 1, 0);
+
+function setCamAddress() {
   const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
+  const rx = -dz, rz = dx;
   const b = S.ball;
+  const portrait = camera.aspect < 1;
   if (isPutting()) {
-    const d = distToPin();
-    const back = 2.4 + Math.min(d, 10) * 0.15;
-    camPosT.set(b.x - dx * back, b.y + 1.0 + Math.min(d, 10) * 0.06, b.z - dz * back);
-    const ahead = Math.min(d, 8) * 0.55;
-    camLookT.set(b.x + dx * ahead, b.y - 0.2, b.z + dz * ahead);
+    const back = 4.1, side = 0.85;
+    camPosT.set(b.x - dx * back + rx * side, b.y + 1.55, b.z - dz * back + rz * side);
+    camLookT.set(b.x + dx * 0.15 + rx * 0.12, b.y + 0.7, b.z + dz * 0.15 + rz * 0.12);
   } else {
-    camPosT.set(b.x - dx * 4.6, b.y + 2.4, b.z - dz * 4.6);
-    const ahead = Math.min(distToPin(), 150) * 0.8;
-    const lx = b.x + dx * ahead, lz = b.z + dz * ahead;
-    camLookT.set(lx, course.heightAt(lx, lz) - ahead * 0.035, lz);
+    const back = portrait ? 6.3 : 7.1;
+    const side = portrait ? 1.35 : 1.55;
+    const height = portrait ? 2.05 : 1.85;
+    camPosT.set(b.x - dx * back + rx * side, b.y + height, b.z - dz * back + rz * side);
+    const ahead = portrait ? 2.1 : 2.8;
+    camLookT.set(b.x + dx * ahead + rx * 0.05, b.y + 0.95, b.z + dz * ahead + rz * 0.05);
   }
-  const h = course.heightAt(camPosT.x, camPosT.z) + 0.6; if (camPosT.y < h) camPosT.y = h;
-  if (snap) { camPos.copy(camPosT); camLook.copy(camLookT); }
+  const h = course.heightAt(camPosT.x, camPosT.z) + 0.45;
+  if (camPosT.y < h) camPosT.y = h;
+}
+
+function setCamOverhead() {
+  const b = S.ball, p = C.PIN;
+  const mx = (b.x + p.x) / 2, mz = (b.z + p.z) / 2;
+  const yaw = yawToPin();
+  const dx = Math.sin(yaw), dz = -Math.cos(yaw);
+  const span = Math.hypot(p.x - b.x, p.z - b.z);
+  const aspect = Math.max(0.38, camera.aspect);
+  const vFov = (camera.aspect < 1 ? 62 : 50) * Math.PI / 180;
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+  const halfLen = span * 0.62 + 16;
+  const halfWid = Math.max(42, span * 0.34);
+  const dist = Math.max(halfLen / Math.tan(vFov / 2), halfWid / Math.tan(hFov / 2), 60);
+  const back = dist * 0.16;
+  const gy = course.heightAt(mx, mz);
+  camPosT.set(mx - dx * back, gy + dist * 0.94, mz - dz * back);
+  camLookT.set(mx + dx * dist * 0.02, gy, mz + dz * dist * 0.02);
+  camUpT.set(dx, 0.18, dz).normalize();
 }
 
 function sampleShot(t) {
@@ -357,22 +622,26 @@ function sampleShot(t) {
 
 let introT = 0;
 function updateCamera(dt) {
+  const overhead = S.phase === 'overhead';
   if (S.phase === 'intro') {
     introT += dt * 0.06;
     const a = introT + 3.3, r = 70;
-    camPos.set(C.PIN.x + Math.sin(a) * r, 22 + Math.sin(introT * 0.7) * 4, C.PIN.z + Math.cos(a) * r);
-    camLook.set(C.PIN.x, 0.5, C.PIN.z + 10);
+    camPosT.set(C.PIN.x + Math.sin(a) * r, 22 + Math.sin(introT * 0.7) * 4, C.PIN.z + Math.cos(a) * r);
+    camLookT.set(C.PIN.x, 0.5, C.PIN.z + 10);
+    camUpT.set(0, 1, 0);
+  } else if (overhead) {
+    setCamOverhead();
   } else if (S.phase === 'aim' || S.phase === 'settle') {
-    if (S.phase === 'aim') setCamAddress(false);
-    camPos.lerp(camPosT, 1 - Math.exp(-dt * 4)); camLook.lerp(camLookT, 1 - Math.exp(-dt * 5));
+    if (S.phase === 'aim') setCamAddress();
+    camUpT.copy(upVec);
   } else if (S.phase === 'flight' || S.phase === 'holed') {
+    camUpT.copy(upVec);
     const shot = S.shot; const res = shot.res;
     const bp = ball.position;
     const dx = Math.sin(S.aimYaw), dz = -Math.cos(S.aimYaw);
     if (shot.putt) {
-      camPosT.set(bp.x - dx * 2.6, bp.y + 1.1, bp.z - dz * 2.6);
+      camPosT.set(bp.x - dx * 3.4 + (-dz) * 0.8, bp.y + 1.45, bp.z - dz * 3.4 + dx * 0.8);
       camLookT.copy(bp);
-      camPos.lerp(camPosT, 1 - Math.exp(-dt * 2.2)); camLook.lerp(camLookT, 1 - Math.exp(-dt * 6));
     } else {
       const flightT = res.frames.filter((f) => f.air).length / 60;
       const carryLen = res.carry ? Math.hypot(res.carry.x - shot.start.x, res.carry.z - shot.start.z) : 0;
@@ -387,198 +656,210 @@ function updateCamera(dt) {
       if (S.camMode === 'chase') {
         camPosT.set(bp.x - dx * 9, bp.y + 2.2, bp.z - dz * 9);
         const gh = Math.max(course.heightAt(camPosT.x, camPosT.z), C.WATER_LEVEL) + 1; if (camPosT.y < gh) camPosT.y = gh;
-        camPos.lerp(camPosT, 1 - Math.exp(-dt * 3.0));
         camLookT.set(bp.x + dx * 6, bp.y, bp.z + dz * 6);
-        camLook.lerp(camLookT, 1 - Math.exp(-dt * 6));
       } else {
-        camLook.lerp(bp, 1 - Math.exp(-dt * 7));
+        camLookT.copy(bp);
       }
     }
   }
-  camera.position.copy(camPos); camera.lookAt(camLook);
+  const k = overhead ? 2.2 : 3.4;
+  camPos.lerp(camPosT, 1 - Math.exp(-dt * (S.phase === 'flight' && S.camMode === 'chase' ? 3 : k)));
+  camLook.lerp(camLookT, 1 - Math.exp(-dt * (overhead ? 2.4 : 5)));
+  camUp.lerp(camUpT, 1 - Math.exp(-dt * 2.6)).normalize();
+  camera.up.copy(camUp);
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
 }
 
-// ---------- input: aim + clubs ----------
 let aimHold = 0;
 function bindHold(el, dir) {
   const on = (e) => { e.preventDefault(); aimHold = dir; }, off = () => { aimHold = 0; };
   el.addEventListener('pointerdown', on); el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off);
 }
 bindHold($('aimL'), -1); bindHold($('aimR'), 1);
-$('clubPrev').onclick = () => { if (S.phase !== 'aim') return; S.clubIdx = (S.clubIdx + clubs.length - 1) % clubs.length; updateHUD(); updateAimVisuals(); };
-$('clubNext').onclick = () => { if (S.phase !== 'aim') return; S.clubIdx = (S.clubIdx + 1) % clubs.length; updateHUD(); updateAimVisuals(); };
+function shiftClub(dir) {
+  if (S.phase !== 'aim' && S.phase !== 'overhead') return;
+  S.clubIdx = (S.clubIdx + dir + clubs.length) % clubs.length;
+  if (isPutting()) {
+    S.target = null;
+    S.phase = 'aim';
+    S.aimYaw = yawToPin();
+    S.targetPower = clamp(puttDistNeeded() / puttScale(), 0.08, 1);
+  } else if (S.phase === 'overhead' || S.target) {
+    if (!S.target) placeInitialTarget();
+    else reclampTargetToClub();
+  }
+  updateHUD(); updateAimVisuals();
+}
+$('clubPrev').onclick = () => shiftClub(-1);
+$('clubNext').onclick = () => shiftClub(1);
 $('resetBtn').onclick = () => { if (S.phase !== 'intro') resetHole(); };
 $('againBtn').onclick = () => resetHole();
 $('settingsBtn').onclick = () => $('settings').classList.remove('hidden');
-$('closeSettings').onclick = () => { $('settings').classList.add('hidden'); S.sens = +$('sensSel').value; S.assist = $('assistChk').checked; applyQuality($('qualSel').value); };
-$('useTouch').onclick = () => setMotionMode(false);
-$('useMotion').onclick = () => enableMotion();
+$('diffBadge').onclick = () => $('settings').classList.remove('hidden');
+$('closeSettings').onclick = () => { $('settings').classList.add('hidden'); setDifficulty($('diffSel').value); applyQuality($('qualSel').value); };
+$('confirmBtn').onclick = () => {
+  if (S.phase !== 'overhead') return;
+  S.phase = 'aim';
+  S.strike = null;
+  updateHUD(); updateAimVisuals();
+};
+$('eyeBtn').onclick = () => {
+  if (S.phase !== 'aim' || isPutting()) return;
+  if (!S.target) placeInitialTarget();
+  S.phase = 'overhead';
+  updateHUD(); updateAimVisuals();
+};
 
-// ---------- power meter ----------
-function showMeter(p, label) {
-  $('meterFill').style.height = Math.min(100, p / 1.1 * 100) + '%';
-  $('meterLbl').textContent = label ?? (Math.round(p * 100) + '%');
+function groundPoint(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObject(W.terrain, false);
+  if (hits.length) return hits[0].point;
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -course.heightAt(S.ball.x, S.ball.z));
+  const hit = new THREE.Vector3();
+  return raycaster.ray.intersectPlane(plane, hit) ? hit : null;
 }
-function hideMeter() { setTimeout(() => showMeter(0, ''), 900); }
+canvas.addEventListener('pointerdown', (e) => {
+  if (S.phase !== 'overhead') return;
+  const p = groundPoint(e);
+  if (!p) return;
+  dragTarget = e.pointerId;
+  canvas.setPointerCapture(e.pointerId);
+  setTargetPoint(p.x, p.z);
+  updateHUD(); updateAimVisuals();
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (dragTarget !== e.pointerId || S.phase !== 'overhead') return;
+  const p = groundPoint(e);
+  if (!p) return;
+  setTargetPoint(p.x, p.z);
+  updateHUD(); updateAimVisuals();
+});
+const endDrag = (e) => { if (e.pointerId === dragTarget) dragTarget = null; };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
 
-// ---------- input: touch swing pad (2K-style swing stick) ----------
 const pad = $('swingPad'), dot = $('padDot'), line = $('padLine');
 let sw = null;
+function resetPad() {
+  dot.style.left = '50%'; dot.style.top = '28%';
+  line.setAttribute('points', '');
+  $('padHint').style.opacity = '0.8';
+  if (!sw) showArc(0, isPutting() ? '0 ft' : '0%');
+}
 pad.addEventListener('pointerdown', (e) => {
-  if (S.phase !== 'aim') return;
-  e.preventDefault(); pad.setPointerCapture(e.pointerId);
+  if (S.phase !== 'aim' || S.vis.holding) return;
+  e.preventDefault();
+  pad.setPointerCapture(e.pointerId);
   const r = pad.getBoundingClientRect();
-  sw = { id: e.pointerId, x0: e.clientX, y0: e.clientY, r, max: 0, phase: 'back', pts: [], tf: 0, yf: 0, xf: 0 };
-  $('padHint').style.opacity = 0;
+  const p = { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() };
+  sw = { id: e.pointerId, r, x0: p.x, y0: p.y, max: 0, phase: 'back', pts: [p], trans: 0, fired: false, tDown: 0.3 };
+  S.vis.releasing = false; S.vis.holding = false;
+  $('padHint').style.opacity = '0';
 });
+function visFromPull(pullNow) {
+  const top = clamp(sw.max, 0.08, 1.25);
+  if (sw.phase === 'back') {
+    S.vis.s = clamp(pullNow, 0, 1.25);
+    S.vis.power = S.vis.s;
+    S.vis.path = 0;
+    return;
+  }
+  if (pullNow >= 0) {
+    const t = 1 - pullNow / top;
+    S.vis.s = top + clamp(t, 0, 1) * (2 - top);
+  } else {
+    S.vis.s = 2 + clamp(-pullNow / 0.5, 0, 1);
+  }
+  S.vis.power = top;
+  const path = pathError(sw.pts, sw.trans, sw.r.width);
+  S.vis.path = clamp(path.sign * path.mag / 0.1, -1, 1);
+}
+function addMove(e) {
+  const p = { x: e.clientX - sw.r.left, y: e.clientY - sw.r.top, t: performance.now() };
+  sw.pts.push(p);
+  if (sw.pts.length > 140) { sw.pts.shift(); if (sw.trans > 0) sw.trans--; }
+  const span = sw.r.height * 0.62;
+  const pull = (p.y - sw.y0) / span;
+  line.setAttribute('points', sw.pts.map((q) => `${(q.x / sw.r.width) * 100},${(q.y / sw.r.height) * 100}`).join(' '));
+  dot.style.left = p.x + 'px'; dot.style.top = p.y + 'px';
+  if (sw.phase === 'back') {
+    sw.max = Math.max(sw.max, Math.min(1.2, pull));
+    const label = isPutting() ? ((Math.max(0, sw.max) * puttScale()) * FT).toFixed(0) + ' ft' : undefined;
+    showArc(Math.max(0, sw.max), label);
+    if (sw.max > 0.1 && pull < sw.max - 0.075) {
+      sw.phase = 'fwd';
+      sw.trans = sw.pts.length - 1;
+      $('padHint').textContent = 'THROUGH';
+    }
+  } else if (!sw.fired && pull <= 0.02 && sw.max > 0.08) {
+    sw.fired = true;
+    sw.tDown = Math.max(0.05, (p.t - sw.pts[sw.trans].t) / 1000);
+    fireSwing();
+  }
+  visFromPull(pull);
+}
 pad.addEventListener('pointermove', (e) => {
   if (!sw || e.pointerId !== sw.id) return;
-  const span = sw.r.height * 0.55;
-  const pull = (e.clientY - sw.y0) / span;
-  const now = performance.now();
-  sw.pts.push([(e.clientX - sw.r.left) / sw.r.width * 100, (e.clientY - sw.r.top) / sw.r.height * 100]);
-  if (sw.pts.length > 60) sw.pts.shift();
-  line.setAttribute('points', sw.pts.map((p) => p.join(',')).join(' '));
-  dot.style.left = (e.clientX - sw.r.left) + 'px'; dot.style.top = (e.clientY - sw.r.top) + 'px';
-  if (sw.phase === 'back') {
-    sw.max = Math.max(sw.max, Math.min(1.1, pull));
-    showMeter(Math.max(0, sw.max), isPutting() ? ((sw.max * puttScale()) * FT).toFixed(0) + ' ft' : undefined);
-    if (sw.max > 0.06 && pull < sw.max - 0.07) { sw.phase = 'fwd'; sw.tf = now; sw.yf = e.clientY; sw.xf = e.clientX; }
-  } else if (sw.phase === 'fwd') {
-    if (e.clientY < sw.y0 - span * 0.22) release(e.clientX, e.clientY, now);
-  }
+  const list = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of list) addMove(ev);
 });
-function release(x, y, now) {
-  const span = sw.r.height * 0.55;
-  const dist = (sw.yf - y) / span;
-  const el = Math.max(16, now - sw.tf) / 1000;
-  const speedN = dist / el;
-  const ang = Math.atan2(x - sw.xf, sw.yf - y) * 180 / Math.PI;
-  let power = sw.max;
-  if (!isPutting()) power *= 0.72 + 0.28 * THREE.MathUtils.smoothstep(speedN, 1.0, 4.5);
-  const face = THREE.MathUtils.clamp(ang * (isPutting() ? 0.5 : 0.4), -14, 14);
-  showMeter(power);
-  sw = null; resetPad();
-  takeShot(power, face);
+function fireSwing() {
+  const trans = Math.min(sw.trans, sw.pts.length - 1);
+  const pts = sw.pts.slice();
+  const path = pathError(pts, trans, sw.r.width);
+  let tMove = pts[0].t;
+  for (const p of pts) { if (p.y > sw.y0 + sw.r.height * 0.04) { tMove = p.t; break; } }
+  const tTrans = pts[trans].t;
+  const tEnd = pts[pts.length - 1].t;
+  const putting = isPutting();
+  const raw = {
+    tBack: Math.max(0.05, (tTrans - tMove) / 1000),
+    tDown: Math.max(0.04, (tEnd - tTrans) / 1000),
+    pathMean: path.mean, pathRms: path.rms, pathMag: path.mag, pathSign: path.sign,
+    rush: transitionRush(pts, trans),
+    power: clamp(sw.max, 0.05, 1.2),
+    targetPower: putting ? clamp(puttDistNeeded() / puttScale(), 0.08, 1) : (S.targetPower || 1),
+    putting, pts, transX: pts[trans].x,
+  };
+  takeShot(raw);
 }
-function resetPad() { dot.style.left = '50%'; dot.style.top = '30%'; line.setAttribute('points', ''); $('padHint').style.opacity = 0.8; }
 pad.addEventListener('pointerup', (e) => {
   if (!sw || e.pointerId !== sw.id) return;
-  if (sw.phase === 'fwd' && (sw.yf - e.clientY) / (sw.r.height * 0.55) > sw.max * 0.4) return release(e.clientX, e.clientY, performance.now());
-  sw = null; resetPad(); showMeter(0, '');
+  if (sw.fired) {
+    const remain = Math.max(0, 3 - S.vis.s);
+    S.vis.releasing = remain > 0.05;
+    S.vis.releaseRate = remain / Math.max(0.16, sw.tDown * 0.55);
+    S.vis.holding = !S.vis.releasing;
+    S.vis.holdT = 0;
+  } else {
+    S.vis.s = 0; S.vis.power = 0; S.vis.path = 0;
+    showArc(0, isPutting() ? '0 ft' : '0%');
+  }
+  sw = null; resetPad();
 });
-pad.addEventListener('pointercancel', () => { sw = null; resetPad(); });
+pad.addEventListener('pointercancel', () => { sw = null; S.vis.s = 0; resetPad(); });
 
-// keyboard (desktop): arrows aim, space hold/release
 addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowLeft') aimHold = -1; if (e.key === 'ArrowRight') aimHold = 1;
-  if (e.key === 'ArrowUp') $('clubPrev').click(); if (e.key === 'ArrowDown') $('clubNext').click();
+  if (e.key === 'ArrowLeft') aimHold = -1;
+  if (e.key === 'ArrowRight') aimHold = 1;
+  if (e.key === 'ArrowUp') shiftClub(-1);
+  if (e.key === 'ArrowDown') shiftClub(1);
+  if (e.key === 'Enter' && S.phase === 'overhead') $('confirmBtn').click();
+  if ((e.key === 'b' || e.key === 'B') && S.phase === 'aim') $('eyeBtn').click();
 });
 addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') aimHold = 0; });
 
-// ---------- input: motion swing ----------
-const mo = { armed: false, phase: 'idle', axis: [0, 0, 0], back: 0, down: 0, peak: 0, twist: 0, last: 0, t0: 0, accPeak: 0, hasGyro: false };
-const mbtn = $('motionBtn');
-function setMotionMode(on) {
-  S.motion = on;
-  mbtn.classList.toggle('hidden', !on); pad.classList.toggle('hidden', on);
-}
-async function enableMotion() {
-  try {
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-      const r = await DeviceMotionEvent.requestPermission();
-      if (r !== 'granted') throw new Error('denied');
-      if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) { try { await DeviceOrientationEvent.requestPermission(); } catch (_) {} }
-    }
-    if (!window.isSecureContext) throw new Error('insecure');
-    let got = false;
-    const probe = (e) => { got = true; };
-    addEventListener('devicemotion', probe);
-    await new Promise((r) => setTimeout(r, 600));
-    removeEventListener('devicemotion', probe);
-    if (!got) throw new Error('nosensor');
-    addEventListener('devicemotion', onMotion);
-    setMotionMode(true);
-    toast('MOTION SWING ON');
-    return true;
-  } catch (err) {
-    setMotionMode(false);
-    toast(err.message === 'nosensor' ? 'NO MOTION SENSOR<br/><small>using touch swing</small>' : 'MOTION NOT ALLOWED<br/><small>using touch swing</small>');
-    return false;
-  }
-}
-mbtn.addEventListener('pointerdown', (e) => {
-  e.preventDefault(); if (S.phase !== 'aim') return;
-  mbtn.setPointerCapture(e.pointerId);
-  Object.assign(mo, { armed: true, phase: 'ready', axis: [0, 0, 0], back: 0, down: 0, peak: 0, twist: 0, last: performance.now(), t0: performance.now(), accPeak: 0 });
-  mbtn.classList.add('armed'); $('motionBtnTxt').textContent = 'SWING!'; $('motionSub').textContent = 'take it back…';
-});
-const disarm = () => { mo.armed = false; mo.phase = 'idle'; mbtn.classList.remove('armed'); $('motionBtnTxt').textContent = 'HOLD & SWING'; $('motionSub').textContent = 'hold phone like a club'; };
-mbtn.addEventListener('pointerup', () => { if (mo.armed && mo.phase !== 'down') { disarm(); showMeter(0, ''); } });
-mbtn.addEventListener('pointercancel', disarm);
-
-function onMotion(e) {
-  if (!mo.armed) return;
-  const now = performance.now();
-  const dt = Math.min(0.05, Math.max(0.001, (now - mo.last) / 1000)); mo.last = now;
-  const rr = e.rotationRate;
-  const a = e.acceleration && e.acceleration.x !== null ? e.acceleration : null;
-  const accMag = a ? Math.hypot(a.x, a.y, a.z) : 0;
-  const putting = isPutting();
-  const full = putting ? 240 : S.sens;
-  if (!rr || rr.alpha === null) {
-    // accelerometer-only fallback: peak linear acceleration sets power
-    mo.accPeak = Math.max(mo.accPeak, accMag);
-    if (mo.phase === 'ready' && accMag > 4) mo.phase = 'down';
-    if (mo.phase === 'down') { showMeter(mo.accPeak / (putting ? 6 : 28)); if (accMag < mo.accPeak * 0.35 && mo.accPeak > 5) { const p = Math.min(1.1, mo.accPeak / (putting ? 6 : 28)); disarm(); takeShot(p, 0); } }
-    return;
-  }
-  const w = [rr.beta || 0, rr.gamma || 0, rr.alpha || 0]; // device x, y, z (deg/s)
-  const mag = Math.hypot(w[0], w[1], w[2]);
-  if (mo.phase === 'ready') {
-    if (mag > (putting ? 25 : 60)) mo.phase = 'back';
-    if (now - mo.t0 > 8000) disarm();
-  }
-  if (mo.phase === 'back') {
-    for (let i = 0; i < 3; i++) mo.axis[i] += w[i] * dt;
-    const al = Math.hypot(...mo.axis) || 1; const ax = mo.axis.map((v) => v / al);
-    const proj = w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2];
-    mo.back = al;
-    showMeter(Math.min(1.1, mo.back / (putting ? 40 : 160)), Math.round(mo.back) + '°');
-    $('motionSub').textContent = 'now swing through!';
-    if (proj < -(putting ? 30 : 90)) { mo.phase = 'down'; mo.ax = ax; mo.down = 0; mo.peak = 0; mo.twist = 0; }
-    if (now - mo.t0 > 6000) disarm();
-  } else if (mo.phase === 'down') {
-    const ax = mo.ax;
-    const proj = -(w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2]);
-    mo.down += Math.max(0, proj) * dt;
-    mo.peak = Math.max(mo.peak, proj);
-    // rotation about the phone's long axis (the "shaft") that isn't part of the swing arc = face rotation
-    const orthoY = w[1] - (w[0] * ax[0] + w[1] * ax[1] + w[2] * ax[2]) * ax[1];
-    mo.twist += orthoY * dt;
-    showMeter(Math.min(1.1, mo.peak / full));
-    const throughImpact = mo.down >= mo.back * 0.9;
-    const fading = mo.peak > (putting ? 40 : 200) && proj < mo.peak * 0.4;
-    if (throughImpact || fading) {
-      const power = Math.min(1.1, mo.peak / full);
-      const face = THREE.MathUtils.clamp(mo.twist * 0.12, -14, 14);
-      disarm();
-      takeShot(power, face);
-    }
-  }
-}
-
-// ---------- intro ----------
-$('motionStart').onclick = async () => { await enableMotion(); startGame(); };
-$('touchStart').onclick = () => { setMotionMode(false); startGame(); };
+$('playBtn').onclick = () => startGame();
 function startGame() {
   $('intro').classList.add('hidden'); $('hud').classList.remove('hidden');
   resetHole();
   try { if (isMobile && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {}); } catch (_) {}
 }
 $('loadMsg').textContent = '';
+try { const saved = localStorage.getItem('vl_diff'); if (saved && DIFF[saved]) setDifficulty(saved); } catch (_) {}
 
-// ---------- quality / perf ----------
 let qualityMode = 'auto';
 function applyQuality(q) {
   qualityMode = q;
@@ -599,20 +880,19 @@ function autoPerf(dt) {
   }
 }
 
-// ---------- pin marker ----------
 const pm = $('pinMarker'), pmd = $('pinMarkerDist');
 const pinTop = new THREE.Vector3(C.PIN.x, course.heightAt(C.PIN.x, C.PIN.z) + 2.5, C.PIN.z);
 function updatePinMarker() {
-  const show = S.phase === 'aim' && distToPin() > 12;
+  const show = (S.phase === 'aim' || S.phase === 'overhead') && distToPin() > 12;
   if (!show) { pm.style.display = 'none'; return; }
   const v = pinTop.clone().project(camera);
   if (v.z > 1) { pm.style.display = 'none'; return; }
   pm.style.display = 'block';
-  pm.style.left = ((v.x + 1) / 2 * innerWidth) + 'px'; pm.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
+  pm.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
+  pm.style.top = ((1 - v.y) / 2 * innerHeight) + 'px';
   pmd.textContent = (distToPin() * YD).toFixed(0) + 'y';
 }
 
-// ---------- main loop ----------
 const clock = new THREE.Clock();
 let elapsed = 0;
 function frame() {
@@ -620,12 +900,36 @@ function frame() {
   elapsed += dt;
   W.timeU.value = elapsed;
   W.water.material.uniforms.time.value += dt * 0.35; W.skyTime.value = elapsed;
-  W.updateFlag(elapsed, Math.atan2(S.wind.x, -S.wind.z) * 0 + (S.wind.ang - Math.PI / 2) * -1);
+  W.updateFlag(elapsed, (S.wind.ang - Math.PI / 2) * -1);
 
-  if (S.phase === 'aim' && aimHold) {
-    S.aimYaw += aimHold * dt * (isPutting() ? 0.12 : 0.22);
+  if ((S.phase === 'aim' || S.phase === 'overhead') && aimHold && !isPutting() && S.target) {
+    S.aimYaw += aimHold * dt * 0.28;
+    const dist = Math.hypot(S.target.x - S.ball.x, S.target.z - S.ball.z);
+    S.target = { x: S.ball.x + Math.sin(S.aimYaw) * dist, z: S.ball.z - Math.cos(S.aimYaw) * dist };
+    S.strike = null;
+    updateAimVisuals(); updateHUD();
+  } else if (S.phase === 'aim' && aimHold && isPutting()) {
+    S.aimYaw += aimHold * dt * 0.12;
     updateAimVisuals(); updateHUD();
   }
+
+  if (S.vis.releasing) {
+    S.vis.s = Math.min(3, S.vis.s + dt * S.vis.releaseRate);
+    if (S.vis.s >= 3) { S.vis.releasing = false; S.vis.holding = true; S.vis.holdT = 0; }
+  } else if (S.vis.holding) {
+    S.vis.holdT += dt;
+    if (S.vis.holdT > 1.15 && S.phase !== 'flight' && S.phase !== 'holed') S.vis.holding = false;
+  } else if (!sw && S.phase === 'aim') {
+    S.vis.s += (0 - S.vis.s) * Math.min(1, dt * 4);
+  }
+
+  const poseName = params.get('pose');
+  let swingS = S.vis.s, swingPower = S.vis.power || S.vis.s, swingPath = S.vis.path;
+  if (poseName === 'address') { swingS = 0; swingPower = 0; swingPath = 0; }
+  else if (poseName === 'top') { swingS = 1; swingPower = 1; swingPath = 0; }
+  else if (poseName === 'finish') { swingS = 3; swingPower = 1; swingPath = params.get('path') === 'open' ? 0.8 : 0; }
+  else if (poseName === 'over') { swingS = 1.22; swingPower = 1.22; swingPath = 0; }
+
   if (S.phase === 'flight' || (S.phase === 'holed' && S.shot)) {
     S.playT += dt;
     const p = sampleShot(S.playT);
@@ -644,9 +948,16 @@ function frame() {
     }
   } else {
     ball.position.set(S.ball.x, S.ball.y, S.ball.z);
+    ball.visible = true;
   }
+
+  golfer.update(dt, {
+    phase: S.phase, ball: S.ball, aimYaw: S.aimYaw, putt: isPutting() && S.phase !== 'overhead',
+    clubId: clubs[S.clubIdx].id, s: swingS, power: swingPower, path: swingPath,
+    time: elapsed, heightAt: (x, z) => course.heightAt(x, z),
+  });
+
   updateCamera(dt);
-  // keep ball visible at distance
   const cd = camera.position.distanceTo(ball.position);
   ball.scale.setScalar(Math.max(1, cd * 0.0022 / P.BALL_R * 0.5));
   const gh = course.heightAt(ball.position.x, ball.position.z);
@@ -656,7 +967,7 @@ function frame() {
   blob.material.opacity = Math.max(0, 1 - hAbove / 25);
   blob.visible = ball.visible && gh > C.WATER_LEVEL;
   updateTracer();
-  // chevrons flow downhill
+  if (ringMat && targetRing.visible) ringMat.opacity = 0.62 + 0.28 * Math.sin(elapsed * 4);
   if (chev.visible) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sv = new THREE.Vector3(0.65, 0.65, 0.65);
     chevPts.forEach((c, i) => {
@@ -681,7 +992,10 @@ function frame() {
 }
 requestAnimationFrame(frame);
 
-// test hooks for automated screenshots
-window.__golf = { S, startGame, takeShot, setMotionMode, camera, resetHole, newShotSetup, placeBall, nominal };
+window.__golf = { S, startGame, takeShot, camera, resetHole, newShotSetup, placeBall, nominal, golfer, gradeSwing, DIFF };
 if (params.has('clean')) document.body.classList.add('clean');
-if (params.has('play')) { $('touchStart').click(); }
+if (params.has('play')) {
+  $('playBtn').click();
+  const pose = params.get('pose');
+  if (pose && pose !== 'overhead') $('confirmBtn').click();
+}

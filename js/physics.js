@@ -43,13 +43,15 @@ const len = (v) => Math.hypot(v.x, v.y, v.z);
  * aimYaw: radians, 0 = toward -Z; positive = to the right (+X)
  * face: degrees, + = open (right) for a right-handed player
  */
-export function launchFromSwing(club, power, face, aimYaw, lie) {
+export function launchFromSwing(club, power, face, aimYaw, lie, mods = {}) {
   const lieM = LIE[lie] || LIE[SURF.FAIRWAY];
   const p = Math.max(0.05, power);
-  const speed = club.speed * MPH * Math.min(p, 1.08) * lieM.speed;
+  const speedMul = mods.speedMul ?? 1;
+  const spinMul = mods.spinMul ?? 1;
+  const speed = club.speed * MPH * Math.min(p, 1.08) * lieM.speed * speedMul;
   // partial swings launch slightly lower with less spin
   const launch = club.launch * (0.85 + 0.15 * Math.min(p, 1)) * (lie === SURF.BUNKER ? 1.15 : 1);
-  const spinRpm = club.spin * (0.6 + 0.4 * Math.min(p, 1)) * lieM.spin;
+  const spinRpm = club.spin * (0.6 + 0.4 * Math.min(p, 1)) * lieM.spin * spinMul;
   const startDir = aimYaw + (face * 0.75) * Math.PI / 180;       // start line mostly from face
   const tilt = Math.max(-35, Math.min(35, face * 1.8)) * Math.PI / 180; // spin-axis tilt -> curve
   const la = launch * Math.PI / 180;
