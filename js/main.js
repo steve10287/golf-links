@@ -6,8 +6,9 @@ import {
 } from './engine.js';
 import { createCamera } from './camera.js';
 import { createHud } from './hud.js';
-import { bindInput } from './input.js';
-import { gradeSwing } from './swing.js';
+import { bindAim } from './aim.js';
+import { createSwingApp } from './swing/index.js';
+import { launchFromStrike, makeStrike } from './swing/strike.js';
 
 const $ = (id) => document.getElementById(id);
 const YD = 1 / 0.9144;
@@ -185,25 +186,29 @@ function holeCourse() {
   };
 }
 
-function strike(raw) {
+function strike(s, ms = 0) {
   if (state.phase !== 'address' || state.holed) return;
+  const strikeIn = makeStrike(s);
   const club = CLUBS[state.club];
   const putt = !!club.putter;
-  raw.putting = putt;
-  raw.targetPower = 1;
-  const g = gradeSwing(raw, 'tour');
   let launch;
   if (putt) {
-    // Stick length picks a flat-green roll. Speed itself is the stimp release.
-    const dist = Math.max(0.35, raw.power * raw.power * 24);
+    const dist = Math.max(0.35, strikeIn.clubSpeed * strikeIn.clubSpeed * 24);
     const speed = Math.sqrt(2 * stimpDecel(11) * dist);
-    launch = launchPutt(speed, state.aim + g.faceDeg * Math.PI / 180 * 0.25);
+    launch = launchPutt(speed, state.aim + strikeIn.faceToTarget * Math.PI / 180 * 0.25);
   } else {
-    launch = launchFromSwing(club, raw.power, g.faceDeg, state.aim, state.lie, {
-      pathDeg: g.pushDeg, speedMul: g.speedMul,
-    });
+    launch = launchFromStrike(club, strikeIn, state.aim, state.lie);
   }
   const res = simulate(holeCourse(), { ...state.ball }, launch, shotEnv(putt), { putt });
+  swings.stats.record(swings.id, {
+    carryYd: res.monitor.carryYd,
+    stockYd: TRACK_CARRY[club.id] || res.monitor.carryYd,
+    offlineYd: res.monitor.offlineYd,
+    grade: strikeIn.grade,
+    ms,
+    putt,
+  });
+  swings.refresh();
   state.prev = { ...state.ball, lie: state.lie };
   state.shot = { res, putt, aim: state.aim };
   state.play = 0;
@@ -255,6 +260,7 @@ function restart() {
   state.aim = yawToPin();
   state.club = clubFor(pinDist());
   hud.hideNote();
+  swings.reroll();
   address();
 }
 
@@ -262,18 +268,18 @@ hud.els.restart.onclick = restart;
 hud.els.prev.onclick = () => { if (!putting()) { state.club = (state.club + CLUBS.length - 1) % (CLUBS.length - 1); paint(); } };
 hud.els.next.onclick = () => { if (!putting()) { state.club = (state.club + 1) % (CLUBS.length - 1); paint(); } };
 
-bindInput({
-  swingEl: hud.swingEl,
-  aimEl: renderer.domElement,
-  dot: hud.els.dot,
-  meter: hud.els.meter,
-  onAim(dx) {
-    if (state.phase !== 'address' || state.holed) return;
-    state.aim += dx * 0.004;
-    paint();
-    cam.setAddress(state.ball, state.aim, (x, z) => course.heightAt(x, z));
-  },
+const swings = createSwingApp({
+  root: hud.swingEl,
+  pickBtn: hud.els.swingPick,
+  sheet: hud.els.sheet,
+  ready: () => state.phase === 'address' && !state.holed,
   onStrike: strike,
+});
+bindAim(renderer.domElement, (dx) => {
+  if (state.phase !== 'address' || state.holed) return;
+  state.aim += dx * 0.004;
+  paint();
+  cam.setAddress(state.ball, state.aim, (x, z) => course.heightAt(x, z));
 });
 
 function buildGround(g) {
@@ -380,6 +386,7 @@ function frame() {
   } else if (flying) {
     cam.update(dt, true);
   }
+  if (state.phase === 'address') swings.tick(dt);
   seatShadow();
   renderer.render(scene, cam.camera);
   requestAnimationFrame(frame);
@@ -391,15 +398,13 @@ function hit(opts = {}) {
   if (opts.aim != null) state.aim = opts.aim;
   syncClub();
   paint();
-  strike({
-    tBack: opts.tBack ?? 0.9,
-    tDown: opts.tDown ?? 0.3,
-    pathMean: 0, pathRms: 0, pathMag: opts.pathMag ?? 0, pathSign: opts.pathSign ?? 0,
-    rush: 0.7,
-    power: opts.power ?? 1,
-    targetPower: 1,
-    putting: false,
-  });
+  strike(makeStrike({
+    clubSpeed: opts.power ?? 1,
+    faceToTarget: opts.face ?? 0,
+    path: opts.path ?? 0,
+    contact: opts.contact ?? 1,
+    tempo: 3,
+  }), opts.ms ?? 400);
 }
 
-window.__core = { state, strike, restart, hit, place, CLUBS, SURF, cam, course, C };
+window.__core = { state, strike, restart, hit, place, CLUBS, SURF, cam, course, C, swings };

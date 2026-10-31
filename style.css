@@ -19,8 +19,76 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #8ec6ea; fon
 #clubName span { font-size: 12px; opacity: .7; }
 #note { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); background: rgba(255,255,255,.9); padding: 8px 12px; border-radius: 10px; font-weight: 700; }
 #note.hidden { display: none; }
-#swing { position: absolute; left: 0; right: 0; bottom: 0; height: 42%; pointer-events: auto; }
-#guide { position: absolute; left: 50%; top: 46%; bottom: 14%; width: 2px; margin-left: -1px; background: rgba(255,255,255,.38); border-radius: 1px; }
-#meter { position: absolute; left: 50%; bottom: 14%; width: 3px; margin-left: 8px; height: 0; background: rgba(255,255,255,.7); border-radius: 2px; }
-#dot { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; background: var(--trail, #f4f1ea); box-shadow: 0 1px 4px rgba(0,0,0,.25); opacity: 0; }
-#swing.live #dot { opacity: 1; }
+#swingPick {
+  position: absolute; left: 50%; top: calc(10px + env(safe-area-inset-top)); transform: translateX(-50%);
+  pointer-events: auto; z-index: 4; border: 0; background: rgba(255,255,255,.88);
+  border-radius: 999px; padding: 8px 12px; font: inherit; font-weight: 700; font-size: 13px;
+  max-width: 48vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#sheet {
+  position: absolute; z-index: 6; pointer-events: auto;
+  left: 10px; right: 10px; top: calc(52px + env(safe-area-inset-top)); bottom: 12px;
+  background: #fff; border-radius: 16px; padding: 12px;
+  display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.12);
+}
+#sheet.hidden { display: none; }
+#randomRow { display: flex; gap: 8px; align-items: center; font-size: 14px; font-weight: 650; margin-bottom: 8px; }
+#methodList { overflow: auto; flex: 1; }
+#methodList .method { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid rgba(0,0,0,.06); background: transparent; padding: 8px 4px; font: inherit; color: inherit; }
+#methodList .method.on { background: rgba(40, 110, 60, .1); }
+#methodList b { display: block; font-size: 15px; }
+#methodList span, #methodList small { display: block; font-size: 12px; opacity: .72; line-height: 1.35; }
+#exportStats { margin-top: 8px; border: 0; border-radius: 10px; padding: 10px; font: inherit; font-weight: 700; background: #1c2430; color: #fff; }
+#hud.sheet-open #swing { pointer-events: none; }
+#swing { position: absolute; left: 0; right: 0; bottom: 0; height: 46%; pointer-events: auto; display: flex; align-items: flex-end; justify-content: center; }
+.sw { width: min(440px, 100%); padding: 0 16px calc(84px + env(safe-area-inset-bottom)); text-align: center; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+#hud.sheet-open #restart { visibility: hidden; }
+.sw-hint, .sw-read { margin: 0 0 8px; font-size: 13px; font-weight: 650; }
+.sw-meter { position: relative; height: 150px; width: 28px; margin: 0 auto 8px; border-radius: 14px; background: rgba(0,0,0,.25); }
+.sw-zone { position: absolute; left: 0; right: 0; }
+.sw-zone.top { top: 6px; height: 22px; background: rgba(255,255,255,.25); border-radius: 8px; }
+.sw-zone.mid { top: 46%; height: 16px; background: rgba(255,255,255,.18); }
+.sw-zone.on { background: rgba(120, 220, 140, .7); }
+.sw-needle { position: absolute; left: -4px; right: -4px; height: 4px; border-radius: 2px; background: #fff; bottom: 50%; }
+.sw-hbar { position: relative; height: 22px; margin: 12px 8px 16px; border-radius: 11px; background: rgba(0,0,0,.28); }
+.sw-hbar.hidden, .sw-pull.hidden { display: none; }
+.sw-hneedle, .sw-pin { position: absolute; top: -3px; width: 4px; height: 28px; margin-left: -2px; background: #fff; border-radius: 2px; }
+.sw-mark { position: absolute; left: 75%; top: 0; bottom: 0; width: 2px; background: rgba(120,220,140,.9); }
+.sw-slot { position: absolute; left: 42%; width: 16%; top: 0; bottom: 0; background: rgba(120,220,140,.55); border-radius: 8px; }
+.sw-band { position: absolute; top: 0; bottom: 0; background: rgba(120,220,140,.55); border-radius: 8px; }
+.sw-pull { height: 70px; width: 18px; margin: 10px auto 16px; border-radius: 9px; background: rgba(255,255,255,.8); transform-origin: top center; }
+.sw-pad { position: relative; height: 150px; margin: 0 0 8px; border-radius: 16px; background: rgba(0,0,0,.18); touch-action: none; }
+.sw-pad.tall { height: 170px; }
+.sw-ball { position: absolute; left: 50%; top: 18px; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%; background: #fff; }
+.sw-line { position: absolute; left: 50%; top: 26px; height: 2px; width: 0; background: rgba(255,255,255,.8); transform-origin: left center; }
+.sw-arrow { font-size: 42px; line-height: 170px; }
+.sw-ring { width: 116px; height: 116px; margin: 6px auto 12px; border-radius: 50%; border: 3px solid rgba(255,255,255,.45); display: grid; place-items: center; position: relative; }
+.sw-ring i { position: absolute; inset: 8px; border-radius: 50%; }
+.sw-ring b { position: relative; font-size: 13px; }
+.sw-dots { display: flex; gap: 18px; justify-content: center; margin: 12px 0 16px; }
+.sw-dots i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; }
+.sw-dots i.on { background: #fff; }
+.sw-hold { height: 120px; width: 22px; margin: 8px auto; border-radius: 11px; background: rgba(0,0,0,.25); position: relative; overflow: hidden; }
+.sw-hold i { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: #fff; }
+.sw-arc { width: 100%; height: 140px; touch-action: none; }
+.sw-dial { width: 140px; height: 140px; margin: 6px auto 12px; border-radius: 50%; border: 3px solid rgba(255,255,255,.7); position: relative; }
+.sw-dial i { position: absolute; left: 50%; top: 50%; width: 46%; height: 3px; background: #fff; transform-origin: left center; }
+.sw-split { display: flex; gap: 10px; margin-bottom: 8px; }
+.sw-split div { flex: 1; height: 120px; border-radius: 14px; background: rgba(0,0,0,.22); display: grid; place-items: center; font-weight: 800; font-size: 22px; }
+.sw-clock { display: flex; gap: 8px; justify-content: center; margin: 8px 0 12px; }
+.sw-clock button { width: 42px; height: 42px; border-radius: 50%; border: 2px solid #fff; background: transparent; color: #fff; font: inherit; font-weight: 700; }
+.sw-clock button.on { background: #fff; color: #1c2430; }
+.sw-pend { height: 150px; display: flex; justify-content: center; }
+.sw-pend i { width: 3px; height: 120px; background: #fff; transform-origin: top center; position: relative; }
+.sw-pend b { position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; }
+.sw-target { width: 120px; height: 120px; margin: 8px auto 12px; position: relative; }
+.sw-target .core { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px; border-radius: 50%; background: #fff; }
+.sw-target .ring { position: absolute; inset: 18px; border: 3px solid #fff; border-radius: 50%; }
+.sw-pinch { position: relative; height: 90px; margin-bottom: 10px; }
+.sw-pinch i { position: absolute; top: 30px; left: 50%; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%; background: #fff; }
+.sw-fader { position: relative; height: 150px; width: 36px; margin: 0 auto 10px; border-radius: 18px; background: rgba(0,0,0,.25); }
+.sw-fader i { position: absolute; left: 4px; right: 4px; top: 12%; height: 22px; border-radius: 11px; background: #fff; }
+.sw-lag { display: flex; gap: 16px; justify-content: center; margin-bottom: 10px; }
+.sw-lag b { width: 72px; height: 72px; border-radius: 16px; border: 2px solid #fff; display: grid; place-items: center; font-size: 22px; }
+.sw-lag b.on { background: #fff; color: #1c2430; }
+.sw-pulse { width: 92px; height: 92px; border-radius: 50%; border: 0; background: #fff; margin-bottom: 8px; }

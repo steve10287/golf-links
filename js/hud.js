@@ -4,13 +4,19 @@ export function createHud(root) {
     <div id="read"><b id="toPin">—</b><span id="stroke">Stroke 1</span></div>
     <div id="wind"><i id="windArrow">➤</i><span id="windVal">0</span></div>
     <button id="restart" type="button">Restart</button>
+    <button id="swingPick" type="button">Swing</button>
+    <div id="sheet" class="hidden">
+      <label id="randomRow"><input id="randomHole" type="checkbox"> Random method each restart</label>
+      <div id="methodList"></div>
+      <button id="exportStats" type="button">Copy stats JSON</button>
+    </div>
     <div id="club">
       <button id="clubPrev" type="button">‹</button>
       <div id="clubName"><b id="clubId">7i</b><span id="clubCarry"></span></div>
       <button id="clubNext" type="button">›</button>
     </div>
     <div id="note" class="hidden"></div>
-    <div id="swing"><div id="guide"></div><div id="meter"></div><div id="dot"></div></div>`;
+    <div id="swing"></div>`;
   let noteT = 0;
   return {
     swingEl: root.querySelector('#swing'),
@@ -22,9 +28,9 @@ export function createHud(root) {
       clubId: root.querySelector('#clubId'),
       clubCarry: root.querySelector('#clubCarry'),
       note: root.querySelector('#note'),
-      dot: root.querySelector('#dot'),
-      meter: root.querySelector('#meter'),
       restart: root.querySelector('#restart'),
+      swingPick: root.querySelector('#swingPick'),
+      sheet: root.querySelector('#sheet'),
       prev: root.querySelector('#clubPrev'),
       next: root.querySelector('#clubNext'),
     },
